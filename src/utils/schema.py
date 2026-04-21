@@ -1,58 +1,92 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
-class Severity(Enum):
+class Severity(str, Enum):
     RED = "RED"
-    GREEN = "GREEN"
     YELLOW = "YELLOW"
+    GREEN = "GREEN"
 
-class Medication(BaseModel):
-    name : str
-    dose: float
-    unit: str
-    frequency: Optional[str]= None
-    rxcui: Optional[str]=None
-    drug_class: Optional[str]=None
-    verified: bool = False
 
-class Action(Enum):
+class Action(str, Enum):
     STOP = "STOP"
-    MONITOR ="MONITOR"
+    MONITOR = "MONITOR"
     CONSULT_DOCTOR = "CONSULT_DOCTOR"
 
 
-class Warning(BaseModel):
-    drugs_involved: List[str]
-    severity : Severity
-    reaction_result : str
-    action: Action
-    citation : List[str] 
-    nurse_summary_to_doctor : str
-    confident: float = 0.0
-    data_source :  str = "FRESH_FDA"
-    compute_date : datetime
-
-class ReconciliationRequest(BaseModel):
-    medications : List[Medication]
-    patient_id : Optional[str] = None
-    nurse_id : Optional[str] = None
-    submitted_at: datetime 
-
-class Status(Enum):
-    SUCCESS ="SUCCESS"
-    PARTIAL ="PARTIAL"
+class Status(str, Enum):
+    SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
     FAILED = "FAILED"
 
+
+class DataSource(str, Enum):
+    FRESH_FDA = "FRESH_FDA"
+    CACHED_FDA = "CACHED_FDA"
+    STATPEARLS_RAG = "STATPEARLS_RAG"
+    FAERS = "FAERS"
+
+
+class Unit(str, Enum):
+    MG = "mg"
+    MCG = "mcg"
+    G = "g"
+    ML = "mL"
+    IU = "IU"
+    UNIT = "unit"
+
+
+# Applied to every model. extra="forbid" is your first line of defense
+# against payload injection — unknown fields raise ValidationError.
+PROD_CONFIG = ConfigDict(
+    str_strip_whitespace=True,
+    extra="forbid",
+    validate_assignment=True,
+)
+
+
+class Medication(BaseModel):
+    model_config = PROD_CONFIG
+    name: str = Field(min_length=2, max_length=100)
+    dose: float = Field(gt=0, le=10000)
+    unit: Unit
+    frequency: Optional[str] = Field(default=None, max_length=50)
+    rxcui: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    drug_class: Optional[str] = Field(default=None, max_length=100)
+    verified: bool = False
+
+
+class DrugWarning(BaseModel):
+    model_config = PROD_CONFIG
+    drugs_involved: List[str] = Field(min_length=1)
+    severity: Severity
+    reaction_result: str = Field(min_length=1, max_length=1000)
+    action: Action
+    citation: List[str] = Field(min_length=1)  # every warning MUST cite
+    nurse_summary_to_doctor: str = Field(min_length=1, max_length=500)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    data_source: DataSource = DataSource.FRESH_FDA
+    computed_at: datetime
+
+
+class ReconciliationRequest(BaseModel):
+    model_config = PROD_CONFIG
+    medications: List[Medication] = Field(min_length=1, max_length=50)
+    patient_id: Optional[str] = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    nurse_id: Optional[str] = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    submitted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ReconciliationResponse(BaseModel):
+    model_config = PROD_CONFIG
     medications: List[Medication]
-    warnings : List[Warning]
-    response_time_ms : float
-    computed_at : datetime
-    status : Status
+    warnings: List[DrugWarning]
     unverified_drugs: List[str]
-    total_medications: int     
-    total_warnings: int         
-    critical_warnings: int  
+    status: Status
+    response_time_ms: float = Field(ge=0)
+    computed_at: datetime
+    total_medications: int = Field(ge=0)
+    total_warnings: int = Field(ge=0)
+    critical_warnings: int = Field(ge=0)

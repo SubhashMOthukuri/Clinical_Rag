@@ -49,13 +49,7 @@ PROD_CONFIG = ConfigDict(
 
 class Medication(BaseModel):
     model_config = PROD_CONFIG
-    # Only allow: letters, digits, spaces, hyphens, underscores, forward slashes, periods, parentheses
-    # Blocks: quotes, angle brackets, semicolons, backticks, newlines, etc.
-    name: str = Field(
-        min_length=2, 
-        max_length=100,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9 \-_/().]*$"
-    )
+    name: str = Field(min_length=2, max_length=100)
     dose: float = Field(gt=0, le=10000)
     unit: Unit
     frequency: Optional[str] = Field(default=None, max_length=50)

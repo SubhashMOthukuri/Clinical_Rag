@@ -427,5 +427,4 @@ def validate_response(
             f"response_time_ms={response.response_time_ms} "
             f"exceeds budget {MAX_RESPONSE_LATENCY_MS}"
         )
-
     return result

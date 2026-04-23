@@ -2,4 +2,4 @@
 .venv
 .test
 /data
-__pycache__/
+test/utils/__pycache__/

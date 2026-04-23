@@ -1,4 +1,8 @@
 .env
 .venv
 .test
+<<<<<<< HEAD
 /data
+=======
+/data
+>>>>>>> 2d9d24c6c4d5dbcfaa37444ec54dfe65d783b8b8

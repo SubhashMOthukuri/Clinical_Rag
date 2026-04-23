@@ -277,7 +277,6 @@ def validate_fda_response(
             "results missing or empty — trigger fallback",
             {"drug": drug_name},
         )
-
     return results
 
 

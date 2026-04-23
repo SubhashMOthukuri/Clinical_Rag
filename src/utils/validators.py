@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from src.utils.schemas import (
+from src.utils.schema import (
     DrugWarning,
     ReconciliationRequest,
     ReconciliationResponse,

@@ -12,7 +12,7 @@ from urllib.parse import quote
 import httpx
 
 from src.utils.validators import StageValidationError, validate_rxnorm_response
-
+from src.utils.circuit_breaker import _CircuitBreaker
 logger = logging.getLogger(__name__)
 
 
@@ -56,26 +56,6 @@ class RxNormConfig:
     cache_size: int = 10_000
     breaker_threshold: int = 5
     breaker_cooldown_s: float = 30.0
-
-
-# ---- Circuit breaker: stop hammering a dead dependency ----
-class _CircuitBreaker:
-    def __init__(self, threshold: int, cooldown_s: float):
-        self._threshold = threshold
-        self._cooldown = cooldown_s
-        self._failures = 0
-        self._open_until = 0.0
-
-    def is_open(self) -> bool:
-        return time.monotonic() < self._open_until
-
-    def record_success(self) -> None:
-        self._failures = 0
-
-    def record_failure(self) -> None:
-        self._failures += 1
-        if self._failures >= self._threshold:
-            self._open_until = time.monotonic() + self._cooldown
 
 
 # ---- Cache with singleflight: hot keys don't thundering-herd the API ----

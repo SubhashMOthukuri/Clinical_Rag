@@ -47,7 +47,7 @@ MAX_RESPONSE_LATENCY_MS = 300.0
 # Allowed: letters, digits, spaces, hyphens, forward slashes, parentheses, periods.
 # Must start with alphanumeric. Rejects: quotes, angle brackets, braces,
 # semicolons, backticks, ampersands, pipes — every common injection vector.
-_DRUG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 \-/().]*$")
+_DRUG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\s\-/().]*$")
 
 # Secondary scan: prompt-injection phrases that can slip past the allowlist
 # (letters and spaces only). Compared against name.lower().

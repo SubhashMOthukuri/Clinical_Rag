@@ -1,6 +1,4 @@
 Category 1 — Data and Validation
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 bad data               → malformed payload
 wrong format           → schema mismatch
 checking data          → enforcing the data contract
@@ -8,11 +6,10 @@ data is correct        → data conforms to the schema
 stops bad data         → rejects at the boundary
 shows an error         → surfaces a structured error
 data goes forward      → propagates downstream
-passes through         → traverses the pipeline
 stores data            → persists to storage
 reads data             → deserializes from storage
 saves result           → writes through to cache
-reads from cache       → serves from the cache layer
+reads from cache       → serves from cache layer
 data shape             → schema / payload structure
 wrong type             → type mismatch at runtime
 empty value            → null / None reference
@@ -20,198 +17,119 @@ missing field          → absent required field
 duplicate data         → idempotency violation
 data is fresh          → within TTL window
 data is old            → stale / past TTL
-data is correct        → validated against contract
-data matches           → conforms to schema
-
 Category 2 — System and Architecture
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 one part of system     → component / service / layer
 goes to next part      → propagates downstream
 comes from other part  → ingested from upstream
-needs another file     → has a hard dependency on X
+needs another file     → hard dependency on X
 backup plan            → fallback strategy
 still works when broken→ degrades gracefully
 stops working          → becomes unavailable
-crashes                → throws unhandled exception
-breaks everything      → cascades into full outage
+crashes                → unhandled exception
+breaks everything      → cascading failure / outage
 one job only           → single responsibility
 does too much          → violates single responsibility
-copies code            → duplicates logic (DRY violation)
-shared code            → shared utility / common module
+copies code            → duplication (DRY violation)
+shared code            → shared utility module
 entry point            → ingestion boundary
 exit point             → response boundary
-between components     → at the service boundary
-whole system           → entire pipeline
-part of system         → component in the pipeline
 connects to            → interfaces with
 talks to               → communicates with
-
 Category 3 — Performance and Latency
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
-slow                   → high latency / latency bottleneck
+slow                   → high latency
 fast                   → low latency / sub-Xms response
-very fast              → sub-10ms / under 300ms P95
+very fast              → sub-10ms / low P95 latency
 how long it takes      → end-to-end latency
-saves time             → reduces latency by Xms
-wastes time            → adds unnecessary latency
-too many requests      → exceeds rate limit threshold
-handles many users     → scales under concurrent load
-can't handle load      → becomes a bottleneck at scale
+saves time             → reduces latency
+wastes time            → adds latency overhead
+too many requests      → rate limit exceeded
+handles many users     → scalable under load
+can't handle load      → bottleneck at scale
 more instances         → horizontal scaling
 bigger machine         → vertical scaling
-auto adds more         → autoscales via HPA
-same time              → concurrently / in parallel
-one at a time          → sequentially / serially
-batches together       → processes in parallel batches
-
+auto adds more         → autoscaling
+same time              → concurrent execution
+one at a time          → sequential execution
 Category 4 — Errors and Failures
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 something goes wrong   → failure mode
-breaks silently        → fails silently / propagates unchecked
-catches errors early   → fails fast at the boundary
-doesn't crash          → degrades gracefully
-still works partially  → operates in degraded mode
-backup kicks in        → fallback is activated
+breaks silently        → silent failure
+catches errors early   → fail fast
+still works partially  → degraded mode
+backup kicks in        → fallback activated
 stops trying           → circuit breaker opens
-tries again            → retries with exponential backoff
-waits before retrying  → applies backoff with jitter
-too many failures      → exceeds failure threshold
-recovers automatically → self-heals after cooldown
-logs the error         → emits structured error log
-tells someone          → triggers alert / pages on-call
-hides the error        → swallows the exception silently
-error message          → structured error payload
-404 not found          → resource not found — HTTP 404
-500 error              → internal server error — HTTP 500
-429 error              → rate limit exceeded — HTTP 429
-
+tries again            → retry with backoff
+waits before retrying  → backoff with jitter
+too many failures      → threshold exceeded
+recovers automatically → self-heals
+logs the error         → structured logging
+tells someone          → alert / on-call page
+hides the error        → swallowed exception
 Category 5 — Caching and Storage
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
-saves in memory        → persists in-process cache
-saves to Redis         → writes to Redis with TTL
-reads from Redis       → serves from Redis cache layer
+saves in memory        → in-process cache
+saves to Redis         → Redis write with TTL
+reads from Redis       → cache layer read
 cache is empty         → cache miss
 cache has it           → cache hit
-old cached data        → stale cache entry
-refreshes cache        → invalidates and repopulates
-how long cache lives   → TTL (time to live)
-deletes cache entry    → evicts from cache
-all pods share cache   → shared distributed cache
-lost when restarted    → volatile / not durable
-survives restart       → durable / persisted
+old cached data        → stale cache
+refreshes cache        → invalidate + repopulate
+how long cache lives   → TTL
+deletes cache entry    → cache eviction
+temporary storage      → ephemeral storage
 permanent storage      → persistent store
-temporary storage      → ephemeral / volatile store
-update if exists       → upsert on conflict
+update if exists       → upsert
 don't add twice        → idempotent write
-
 Category 6 — Security and Safety
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 hacker input           → adversarial input
-fake instructions      → prompt injection attack
+fake instructions      → prompt injection
 dangerous input        → malicious payload
-checks for attacks     → sanitizes against injection vectors
-allows only good chars → enforces character allowlist
-blocks bad patterns    → rejects injection signatures
-patient data           → PHI (protected health information)
-can't see patient data → PHI never persists
+checks for attacks     → input sanitization
+allows only good chars → allowlist enforcement
+blocks bad patterns    → signature-based blocking
+patient data           → PHI
 follows health rules   → HIPAA compliant
-safe guess             → fail closed
-risky guess            → fail open
+safe guess             → fail open
+risky guess            → fail closed
 always reject if unsure→ fail closed by default
-
 Category 7 — Testing and Quality
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 tests pass             → test suite is green
-fake API call          → mocked external dependency
+fake API call          → mocked dependency
 fake object            → test double / mock
-tests work in isolation→ unit tested with mocked deps
-tests work together    → integration tested end-to-end
-test covers everything → achieves full behavior coverage
-test checks side effect→ asserts on observable side effect
-tests normal case      → validates happy path
-tests broken case      → validates failure mode
-tests edge case        → validates boundary condition
-test name              → test_{method}_{condition}_{outcome}
-
+tests isolated         → unit tests
+tests together         → integration tests
+tests normal case      → happy path
+tests broken case      → failure mode test
+tests edge case        → boundary test
 Category 8 — Observability and Monitoring
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
-watching the system    → observability
-tracking numbers       → emitting metrics
-logs                   → structured log output
-track one request      → distributed tracing
+watching system        → observability
+tracking numbers       → metrics
+logs                   → structured logs
+track request          → distributed tracing
 unique request ID      → correlation ID
-measures latency       → tracks P50/P95/P99 latency
-sends alert            → triggers PagerDuty notification
-dashboard              → Grafana observability dashboard
-counts errors          → tracks error rate
-how often cache works  → cache hit rate
-
+measures latency       → P50/P95/P99 latency
+sends alert            → on-call notification
+dashboard              → monitoring dashboard
+counts errors          → error rate tracking
+cache success rate     → cache hit rate
 Category 9 — Code Design Patterns
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 stops bad API calls    → circuit breaker pattern
-only one call at once  → singleflight pattern
-waits in line          → request queuing
+only one call at once  → singleflight
+waits in line          → request queue
 checks before acting   → guard clause
-defines what goes in   → input contract
-defines what comes out → output contract
-defines what it does   → interface / protocol
-can swap pieces out    → loosely coupled
-hard to swap           → tightly coupled
-can test in isolation  → injectable dependency
-fixed allowed values   → enumerated type / Enum
+defines input          → input contract
+defines output         → output contract
+fixed allowed values   → enum / enumerated type
 required field         → non-nullable field
-optional field         → nullable / Optional field
+optional field         → nullable field
 default value          → fallback default
-
 Category 10 — Healthcare Specific
-VAGUE WORD              STAFF WORD
-─────────────────────────────────────────────────────
 drug name              → medication identifier
-drug ID                → normalized rxcui
-standard drug name     → RxNorm canonical form
-brand vs generic       → brand-to-generic normalization
-drug reaction          → adverse drug event
+drug ID                → RxCUI
+standard drug name     → RxNorm form
+drug reaction          → adverse event
 two drugs conflict     → drug-drug interaction
-very dangerous         → clinically significant / RED severity
-watch carefully        → monitor — YELLOW severity
-safe combination       → no known interaction — GREEN
-official drug info     → FDA Drug Label
-patient reports        → FAERS adverse event data
-medical article        → StatPearls clinical guideline
-fake medical claim     → hallucinated citation
-proven claim           → grounded in source document
-nurse sees result      → delivered at point of care
-
-How To Use This Bank Daily
-Step 1: Screenshot and save this to your phone
-Step 2: Every time you speak — catch vague words
-Step 3: Look at the bank — find the staff word
-Step 4: Say the sentence again with the swap
-Step 5: After 14 days — stop looking at the bank
-
-Test yourself after 7 days:
-Cover the right column.
-Look at the vague word.
-Say the staff word without looking.
-
-The 10 Most Important Words To Learn First
-Priority 1 — use these from today:
-
-1. malformed payload     (not "bad data")
-2. propagates downstream (not "goes to next part")
-3. system boundary       (not "entry point")
-4. degrades gracefully   (not "still works")
-5. fail closed           (not "safe guess")
-6. circuit breaker       (not "stops trying")
-7. data contract         (not "checking data")
-8. surfaces structured error (not "shows error")
-9. persists to storage   (not "saves data")
-10. correlation ID       (not "unique request ID")
+very dangerous         → high severity
+watch carefully        → medium severity
+safe combination       → no interaction
+official drug info     → FDA label
+patient reports        → FAERS data
+medical article        → clinical guideline

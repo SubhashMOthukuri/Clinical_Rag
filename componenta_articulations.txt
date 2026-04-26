@@ -1,0 +1,214 @@
+## 5-Sentence Articulation — All Components
+Date: April 2026
+
+---
+
+### schemas.py
+
+Problem:
+Without schemas.py, data flowing between components
+has no guaranteed structure — a nurse could submit
+an integer where a drug name is expected,
+and the system would silently pass bad data
+all the way to the LLM before failing.
+
+Solution:
+schemas.py defines the data contract for every
+boundary in the system using Pydantic BaseModel
+and Enum, so invalid data is caught and rejected
+at the exact moment it enters each component.
+
+Decision:
+We chose Pydantic over manual validation because
+Pydantic enforces types automatically at runtime,
+generates clear error messages, and integrates
+natively with FastAPI request parsing.
+
+Tradeoff:
+Pydantic adds a small serialization overhead
+per request, which we accept because the safety
+guarantee of catching bad data early is worth
+more than microseconds of validation time.
+
+Result:
+Every component in the system receives
+exactly the data shape it expects —
+no silent failures, no type errors downstream,
+no bad data reaching the LLM or the nurse.
+
+---
+
+### validators.py
+
+Problem:
+Without validators.py, a malicious user could
+submit a prompt injection attack inside a drug name,
+or a NaN dose value could reach the LLM and cause
+a hallucinated interaction warning that puts
+a patient on a dangerous medication combination.
+
+Solution:
+validators.py implements a 5-stage validation pipeline
+that checks data quality at every transition point —
+input, RxNorm output, FDA output, LLM output,
+and final response — before passing data forward.
+
+Decision:
+We chose fail-closed validation for Stage 4 LLM output,
+meaning we reject the entire response if even one
+warning lacks a citation, rather than passing partial
+results to the nurse.
+
+Tradeoff:
+Fail-closed means occasionally valid responses
+get rejected due to strict citation checking,
+which we accept because in healthcare,
+an uncited medical claim reaching a nurse
+is more dangerous than a rejected response.
+
+Result:
+The system never surfaces an uncited drug interaction
+warning to a nurse, eliminating hallucination risk
+at the most critical patient safety boundary.
+
+---
+
+### circuit_breaker.py
+
+Problem:
+Without a circuit breaker, when RxNorm or FDA API
+degrades under load, every pod keeps retrying
+the failing dependency — amplifying the outage,
+exhausting connection pools, and cascading failures
+across the entire system.
+
+Solution:
+circuit_breaker.py implements the circuit breaker pattern —
+after 5 consecutive failures, it stops calling
+the dependency for 30-60 seconds, letting it recover
+while the system degrades gracefully to the next fallback.
+
+Decision:
+We chose a shared circuit breaker class over
+per-client implementations to enforce DRY —
+both RxNorm and FDA clients import the same
+_CircuitBreaker, guaranteeing consistent behavior.
+
+Tradeoff:
+A tripped circuit breaker means some requests
+return UNVERIFIED or None even if the API recovers
+mid-cooldown, which we accept because the alternative
+— hammering a degraded API — makes recovery impossible.
+
+Result:
+The system self-heals under dependency failures,
+degrading gracefully through fallback levels
+rather than cascading into a full outage.
+
+---
+
+### rxnorm_client.py
+
+Problem:
+Without rxnorm_client.py, drug names from nurses
+enter the system in inconsistent formats —
+"Advil", "ibuprofen", "IBU 400" — making it
+impossible to reliably check interactions
+because FDA and FAERS use different naming standards.
+
+Solution:
+rxnorm_client.py normalizes every drug name
+to a standard rxcui ID using the RxNorm API,
+so "Advil", "ibuprofen", and "Motrin" all resolve
+to the same ID before any interaction checking begins.
+
+Decision:
+We chose typed result classes (RxcuiFound,
+RxcuiUnverified, RxcuiLookupFailed) over returning
+None because typed results force every caller
+to handle every outcome explicitly,
+eliminating silent failure modes.
+
+Tradeoff:
+The in-memory singleflight cache is process-local —
+lost on pod restart and not shared between pods —
+which we accept for MVP, with a Redis-backed
+shared cache planned for Phase 2.
+
+Result:
+Every drug entering the pipeline has a standard
+identifier, enabling accurate interaction checking
+regardless of how the nurse spelled the drug name.
+
+---
+
+### fda_client.py
+
+Problem:
+Without fda_client.py, the system has no source
+for official drug interaction warnings — it cannot
+tell a nurse that ibuprofen and lisinopril together
+risk kidney damage, or that methotrexate
+must not be combined with NSAIDs.
+
+Solution:
+fda_client.py fetches official warnings,
+drug interactions, and contraindications
+from the FDA Drug Label API, providing
+authoritative, citable evidence for every
+RED and YELLOW interaction flag.
+
+Decision:
+We chose Redis over in-memory caching for FDA data
+because drug labels are large (kilobytes of text),
+Redis is shared across all pods, and a 7-day TTL
+matches the FDA's monthly update cycle safely.
+
+Tradeoff:
+A 7-day cache means nurses may see interaction data
+that is up to 7 days old, which we accept because
+FDA label updates are monthly and our weekly
+refresh job catches all updates with margin.
+
+Result:
+Every interaction warning returned to the nurse
+is backed by an official FDA label citation,
+with sub-10ms response time on cache hits
+versus 200ms on fresh API calls.
+
+---
+
+### drug_cache_store.py
+
+Problem:
+Without drug_cache_store.py, when RxNorm API fails,
+every drug returns UNVERIFIED — meaning nurses
+receive zero interaction checking at point of care,
+creating a direct patient safety risk
+every time a third-party API has an outage.
+
+Solution:
+drug_cache_store.py eliminates this single point
+of failure by persisting every successful RxNorm
+lookup to PostgreSQL, giving the system a permanent
+fallback that survives API outages,
+pod restarts, and network failures.
+
+Decision:
+We chose PostgreSQL over Redis for permanent storage
+because Redis is volatile — data is lost on restart —
+while PostgreSQL persists across any failure scenario
+and gives us ACID guarantees for drug data integrity.
+
+Tradeoff:
+The tradeoff is cold start — a drug queried for
+the first time during an RxNorm outage returns
+UNVERIFIED because it was never cached before,
+which we accept because the cache warms naturally
+with every successful lookup over time.
+
+Result:
+Nurses always receive drug normalization data
+for any previously queried medication,
+even during complete RxNorm API outages,
+maintaining patient safety without exception.

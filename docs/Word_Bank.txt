@@ -1,0 +1,135 @@
+Category 1 — Data and Validation
+bad data               → malformed payload
+wrong format           → schema mismatch
+checking data          → enforcing the data contract
+data is correct        → data conforms to the schema
+stops bad data         → rejects at the boundary
+shows an error         → surfaces a structured error
+data goes forward      → propagates downstream
+stores data            → persists to storage
+reads data             → deserializes from storage
+saves result           → writes through to cache
+reads from cache       → serves from cache layer
+data shape             → schema / payload structure
+wrong type             → type mismatch at runtime
+empty value            → null / None reference
+missing field          → absent required field
+duplicate data         → idempotency violation
+data is fresh          → within TTL window
+data is old            → stale / past TTL
+Category 2 — System and Architecture
+one part of system     → component / service / layer
+goes to next part      → propagates downstream
+comes from other part  → ingested from upstream
+needs another file     → hard dependency on X
+backup plan            → fallback strategy
+still works when broken→ degrades gracefully
+stops working          → becomes unavailable
+crashes                → unhandled exception
+breaks everything      → cascading failure / outage
+one job only           → single responsibility
+does too much          → violates single responsibility
+copies code            → duplication (DRY violation)
+shared code            → shared utility module
+entry point            → ingestion boundary
+exit point             → response boundary
+connects to            → interfaces with
+talks to               → communicates with
+Category 3 — Performance and Latency
+slow                   → high latency
+fast                   → low latency / sub-Xms response
+very fast              → sub-10ms / low P95 latency
+how long it takes      → end-to-end latency
+saves time             → reduces latency
+wastes time            → adds latency overhead
+too many requests      → rate limit exceeded
+handles many users     → scalable under load
+can't handle load      → bottleneck at scale
+more instances         → horizontal scaling
+bigger machine         → vertical scaling
+auto adds more         → autoscaling
+same time              → concurrent execution
+one at a time          → sequential execution
+Category 4 — Errors and Failures
+something goes wrong   → failure mode
+breaks silently        → silent failure
+catches errors early   → fail fast
+still works partially  → degraded mode
+backup kicks in        → fallback activated
+stops trying           → circuit breaker opens
+tries again            → retry with backoff
+waits before retrying  → backoff with jitter
+too many failures      → threshold exceeded
+recovers automatically → self-heals
+logs the error         → structured logging
+tells someone          → alert / on-call page
+hides the error        → swallowed exception
+Category 5 — Caching and Storage
+saves in memory        → in-process cache
+saves to Redis         → Redis write with TTL
+reads from Redis       → cache layer read
+cache is empty         → cache miss
+cache has it           → cache hit
+old cached data        → stale cache
+refreshes cache        → invalidate + repopulate
+how long cache lives   → TTL
+deletes cache entry    → cache eviction
+temporary storage      → ephemeral storage
+permanent storage      → persistent store
+update if exists       → upsert
+don't add twice        → idempotent write
+Category 6 — Security and Safety
+hacker input           → adversarial input
+fake instructions      → prompt injection
+dangerous input        → malicious payload
+checks for attacks     → input sanitization
+allows only good chars → allowlist enforcement
+blocks bad patterns    → signature-based blocking
+patient data           → PHI
+follows health rules   → HIPAA compliant
+safe guess             → fail open
+risky guess            → fail closed
+always reject if unsure→ fail closed by default
+Category 7 — Testing and Quality
+tests pass             → test suite is green
+fake API call          → mocked dependency
+fake object            → test double / mock
+tests isolated         → unit tests
+tests together         → integration tests
+tests normal case      → happy path
+tests broken case      → failure mode test
+tests edge case        → boundary test
+Category 8 — Observability and Monitoring
+watching system        → observability
+tracking numbers       → metrics
+logs                   → structured logs
+track request          → distributed tracing
+unique request ID      → correlation ID
+measures latency       → P50/P95/P99 latency
+sends alert            → on-call notification
+dashboard              → monitoring dashboard
+counts errors          → error rate tracking
+cache success rate     → cache hit rate
+Category 9 — Code Design Patterns
+stops bad API calls    → circuit breaker pattern
+only one call at once  → singleflight
+waits in line          → request queue
+checks before acting   → guard clause
+defines input          → input contract
+defines output         → output contract
+fixed allowed values   → enum / enumerated type
+required field         → non-nullable field
+optional field         → nullable field
+default value          → fallback default
+Category 10 — Healthcare Specific
+drug name              → medication identifier
+drug ID                → RxCUI
+standard drug name     → RxNorm form
+drug reaction          → adverse event
+two drugs conflict     → drug-drug interaction
+very dangerous         → high severity
+watch carefully        → medium severity
+safe combination       → no interaction
+official drug info     → FDA label
+patient reports        → FAERS data
+medical article        → clinical guideline

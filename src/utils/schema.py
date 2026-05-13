@@ -53,7 +53,8 @@ class Medication(BaseModel):
     dose: float = Field(gt=0, le=10000)
     unit: Unit
     frequency: Optional[str] = Field(default=None, max_length=50)
-    rxcui: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    rxcui: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")  # dose-specific
+    ingredient_rxcui: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")  # ingredient
     drug_class: Optional[str] = Field(default=None, max_length=100)
     verified: bool = False
 

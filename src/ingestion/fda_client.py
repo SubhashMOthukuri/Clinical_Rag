@@ -25,6 +25,8 @@ class FDADrugData:
     source: str
     fetched_at: datetime
     fda_label_id: str = "" 
+        dose: float = 0.0
+        unit: str = ""
 
 @dataclass(frozen=True)
 class FDAConfig:
@@ -115,14 +117,14 @@ class FDAClient:
             drug_class=d["drug_class"],
             warnings=d["warnings"],
             drug_interactions=d["drug_interactions"],
-            do_not_use=d["do_not_use"],
+                # Check Redis cache first
             ask_doctor=d["ask_doctor"],
-            source="REDIS_CACHE",
+                    cached = await self._redis.get(f"fda:{ingredient_rxcui}")
             fetched_at=datetime.fromisoformat(d["fetched_at"]),
             fda_label_id=d.get("fda_label_id", ""),
         )
 
-    async def _fetch_from_fda(
+                        logger.info("fda.cache_hit rxcui=%s cid=%s", ingredient_rxcui, correlation_id)
         self,
         drug_name: str,
         cid: str | None,
@@ -130,15 +132,15 @@ class FDAClient:
 
         url = (
             f"{self._cfg.base_url}/label.json"
-            f"?search=openfda.generic_name:{quote(drug_name)}&limit=1"
-        )
+                # Call FDA API
+                result = await self._fetch_from_fda(drug_name, ingredient_rxcui, dose, unit, correlation_id)
 
         for attempt in range(1, self._cfg.max_attempts + 1):
             try:
                 resp = await self._http.get(url)
             except httpx.TimeoutException:
-                logger.warning(
-                    "fda.timeout drug=%s attempt=%d cid=%s",
+                    await self._redis.setex(
+                        f"fda:{ingredient_rxcui}",
                     drug_name, attempt, cid
                 )
                 if attempt < self._cfg.max_attempts:
@@ -153,10 +155,10 @@ class FDAClient:
                 )
                 self._breaker.record_failure()
                 return None
-
-            if resp.status_code != 200:
-                logger.warning(
-                    "fda.http_error drug=%s status=%d cid=%s",
+                url = (
+                    f"{self._cfg.base_url}/label.json"
+                    f"?search=openfda.rxcui:{quote(ingredient_rxcui)}&limit=1"
+                )
                     drug_name, resp.status_code, cid
                 )
                 self._breaker.record_failure()

@@ -19,6 +19,7 @@ class DrugRecord:
     lookup_count: int
     last_verified_at: datetime
     created_at: datetime
+        ingredient_rxcui: str
 
 
 class DrugCacheStore:
@@ -50,6 +51,7 @@ class DrugCacheStore:
                 logger.info("drug_cache.saved drug=%s rxcui=%s", drug_name, rxcui)
         except Exception as e:
             logger.error("drug_cache.save_failed drug=%s error=%s", drug_name, e)
+                        logger.info("drug_cache.saved drug=%s rxcui=%s ingredient_rxcui=%s", drug_name, rxcui, ingredient_rxcui)
             raise
 
     async def get_drug_by_name(

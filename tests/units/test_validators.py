@@ -109,6 +109,56 @@ class TestMedicationValidation:
             )
         assert "String should match pattern" in str(exc.value)
 
+    def test_medication_ingredient_rxcui_optional(self):
+        """Test ingredient_rxcui is optional and accepts valid digits."""
+        med = Medication(
+            name="metformin",
+            dose=500.0,
+            unit=Unit.MG,
+            ingredient_rxcui="6809"
+        )
+        assert med.ingredient_rxcui == "6809"
+        assert med.rxcui is None
+
+    def test_medication_ingredient_rxcui_pattern(self):
+        """Test ingredient_rxcui must be numeric (1-10 digits)."""
+        with pytest.raises(ValidationError) as exc:
+            Medication(
+                name="aspirin",
+                dose=100.0,
+                unit=Unit.MG,
+                ingredient_rxcui="abc"
+            )
+        assert "String should match pattern" in str(exc.value)
+
+    def test_medication_ingredient_rxcui_rejects_special_chars(self):
+        """Test ingredient_rxcui rejects injection payloads."""
+        with pytest.raises(ValidationError):
+            Medication(
+                name="aspirin",
+                dose=100.0,
+                unit=Unit.MG,
+                ingredient_rxcui="123; DROP TABLE;"
+            )
+
+    def test_medication_both_rxcui_fields(self):
+        """Test dose-specific rxcui and ingredient_rxcui can coexist."""
+        med = Medication(
+            name="metformin",
+            dose=500.0,
+            unit=Unit.MG,
+            rxcui="860975",
+            ingredient_rxcui="6809"
+        )
+        assert med.rxcui == "860975"
+        assert med.ingredient_rxcui == "6809"
+
+    def test_medication_rxcui_defaults_to_none(self):
+        """Test both rxcui fields default to None."""
+        med = Medication(name="aspirin", dose=100.0, unit=Unit.MG)
+        assert med.rxcui is None
+        assert med.ingredient_rxcui is None
+
 
 class TestReconciliationRequest:
     """Test ReconciliationRequest schema validation."""

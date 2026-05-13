@@ -502,6 +502,123 @@ class TestRxNormClientCircuitBreaker:
         assert isinstance(result, RxcuiFound)
 
 
+class TestGetIngredientRxcui:
+    """Test get_ingredient_rxcui: resolves dose-specific RXCUI to ingredient RXCUI."""
+
+    @pytest.mark.asyncio
+    async def test_returns_ingredient_rxcui_on_success(self):
+        """Test: Valid dose-specific rxcui returns the ingredient-level rxcui."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+
+        response_mock = MagicMock()
+        response_mock.status_code = 200
+        response_mock.json.return_value = {
+            "allRelatedGroup": {
+                "conceptGroup": [
+                    {"tty": "SCD", "conceptProperties": [{"rxcui": "860975"}]},
+                    {"tty": "IN", "conceptProperties": [{"rxcui": "6809"}]},
+                ]
+            }
+        }
+        response_mock.raise_for_status = MagicMock()
+        http_mock.get.return_value = response_mock
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        result = await client.get_ingredient_rxcui("860975")
+
+        assert result == "6809"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_ingredient_group(self):
+        """Test: No IN tty group returns None."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+
+        response_mock = MagicMock()
+        response_mock.status_code = 200
+        response_mock.json.return_value = {
+            "allRelatedGroup": {
+                "conceptGroup": [
+                    {"tty": "SCD", "conceptProperties": [{"rxcui": "860975"}]},
+                ]
+            }
+        }
+        response_mock.raise_for_status = MagicMock()
+        http_mock.get.return_value = response_mock
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        result = await client.get_ingredient_rxcui("860975")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_ingredient_group_empty(self):
+        """Test: IN group with no concepts returns None."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+
+        response_mock = MagicMock()
+        response_mock.status_code = 200
+        response_mock.json.return_value = {
+            "allRelatedGroup": {
+                "conceptGroup": [
+                    {"tty": "IN", "conceptProperties": []},
+                ]
+            }
+        }
+        response_mock.raise_for_status = MagicMock()
+        http_mock.get.return_value = response_mock
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        result = await client.get_ingredient_rxcui("860975")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_network_error(self):
+        """Test: Network error returns None (does not raise)."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+        http_mock.get.side_effect = httpx.ConnectError("connection refused")
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        result = await client.get_ingredient_rxcui("860975")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_timeout(self):
+        """Test: Timeout returns None (does not raise)."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+        http_mock.get.side_effect = httpx.TimeoutException("timeout")
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        result = await client.get_ingredient_rxcui("860975")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_calls_correct_allrelated_endpoint(self):
+        """Test: Uses the allrelated endpoint with the given dose-specific rxcui."""
+        config = RxNormConfig()
+        http_mock = AsyncMock(spec=httpx.AsyncClient)
+
+        response_mock = MagicMock()
+        response_mock.status_code = 200
+        response_mock.json.return_value = {"allRelatedGroup": {"conceptGroup": []}}
+        response_mock.raise_for_status = MagicMock()
+        http_mock.get.return_value = response_mock
+
+        client = RxNormClient(config=config, http_client=http_mock)
+        await client.get_ingredient_rxcui("860975")
+
+        call_url = http_mock.get.call_args.args[0]
+        assert "860975" in call_url
+        assert "allrelated" in call_url
+
+
 class TestRxNormClientMetrics:
     """Test metrics collection."""
 

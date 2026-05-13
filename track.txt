@@ -1,0 +1,6 @@
+Day 1: Project structure + data download
+Day 2: Architecture + requirements
+Day 3: schemas.py + API research
+Day 4: validators.py + rxnorm_client.py
+       fda_client.py + drug_cache_store.py
+       38 passing tests total

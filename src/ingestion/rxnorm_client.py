@@ -1,9 +1,9 @@
-# rxnorm_client.py
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -13,23 +13,27 @@ import httpx
 
 from src.utils.validators import StageValidationError, validate_rxnorm_response
 from src.utils.circuit_breaker import _CircuitBreaker
+
 logger = logging.getLogger(__name__)
 
 
-# ---- Result type: four outcomes, not three Nones ----
+# ---- Result types: four outcomes, not three Nones ----
 @dataclass(frozen=True)
 class RxcuiFound:
     rxcui: str
     from_cache: bool = False
 
+
 @dataclass(frozen=True)
 class RxcuiUnverified:
-    drug_name: str  # in RxNorm's view, this drug isn't known — clinician review
+    drug_name: str  # RxNorm doesn't recognise this drug — clinician review required
+
 
 @dataclass(frozen=True)
 class RxcuiLookupFailed:
     drug_name: str
     reason: str  # timeout | network | http_4xx | http_5xx | malformed | circuit_open | bad_input
+
 
 RxcuiResult = RxcuiFound | RxcuiUnverified | RxcuiLookupFailed
 
@@ -38,6 +42,7 @@ RxcuiResult = RxcuiFound | RxcuiUnverified | RxcuiLookupFailed
 class Metrics(Protocol):
     def incr(self, name: str, tags: dict[str, str] | None = ...) -> None: ...
     def observe(self, name: str, value: float, tags: dict[str, str] | None = ...) -> None: ...
+
 
 class _NoopMetrics:
     def incr(self, name, tags=None): pass
@@ -80,7 +85,7 @@ class _TTLCacheWithSingleflight:
         return value
 
     async def get_or_compute(self, key, factory):
-        # Fast path
+        # Fast path — no lock needed for a cache hit
         cached = self._get_fresh(key)
         if cached is not None:
             return cached, True
@@ -91,7 +96,6 @@ class _TTLCacheWithSingleflight:
                 return cached, True
 
             if key in self._inflight:
-                # Another task is already computing this — wait on it
                 fut = self._inflight[key]
                 wait_on_existing = True
             else:
@@ -143,17 +147,16 @@ class RxNormClient:
         if self._owns_http:
             await self._http.aclose()
 
+    # ---- Public API ----
+
     async def get_rxcui(self, drug_name: str, *, correlation_id: str | None = None) -> RxcuiResult:
         normalized = (drug_name or "").strip().lower()
         log_ctx = {"drug": drug_name, "cid": correlation_id}
 
-        # Validate input: reject injection attempts, special characters
         if not normalized:
             self._metrics.incr("rxnorm.bad_input")
             return RxcuiLookupFailed(drug_name, "bad_input")
-        
-        # Ensure drug name matches safe pattern (alphanumeric, spaces, hyphens, slashes, parens)
-        import re
+
         if not re.match(r"^[a-z0-9 \-/().]*$", normalized):
             self._metrics.incr("rxnorm.invalid_characters")
             logger.warning("rxnorm.invalid_input_chars", extra=log_ctx)
@@ -178,6 +181,55 @@ class RxNormClient:
         if isinstance(result, RxcuiFound) and from_cache:
             return RxcuiFound(result.rxcui, from_cache=True)
         return result
+
+    async def get_ingredient_rxcui(self, dose_specific_rxcui: str) -> str | None:
+        """Resolve a dose-specific RXCUI to its ingredient-level RXCUI (TTY='IN').
+
+        Returns the ingredient rxcui string, or None if not found or on error.
+        """
+        if self._breaker.is_open():
+            self._metrics.incr("rxnorm.ingredient.circuit_open")
+            logger.warning("rxnorm.ingredient.circuit_open rxcui=%s", dose_specific_rxcui)
+            return None
+
+        url = f"{self._cfg.base_url}/rxcui/{dose_specific_rxcui}/allrelated.json"
+        t0 = time.perf_counter()
+        try:
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            self._breaker.record_success()
+            self._metrics.incr("rxnorm.ingredient.found")
+        except httpx.TimeoutException:
+            self._breaker.record_failure()
+            self._metrics.incr("rxnorm.ingredient.timeout")
+            logger.warning("rxnorm.ingredient.timeout rxcui=%s", dose_specific_rxcui)
+            return None
+        except httpx.RequestError as e:
+            self._breaker.record_failure()
+            self._metrics.incr("rxnorm.ingredient.network_error")
+            logger.warning("rxnorm.ingredient.network_error rxcui=%s error=%s", dose_specific_rxcui, type(e).__name__)
+            return None
+        except Exception as e:
+            self._breaker.record_failure()
+            self._metrics.incr("rxnorm.ingredient.error")
+            logger.warning("rxnorm.ingredient.error rxcui=%s error=%s", dose_specific_rxcui, e)
+            return None
+        finally:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            self._metrics.observe("rxnorm.ingredient.latency_ms", elapsed_ms)
+
+        concept_groups = data.get("allRelatedGroup", {}).get("conceptGroup", [])
+        for group in concept_groups:
+            if group.get("tty") == "IN":
+                concepts = group.get("conceptProperties", [])
+                if concepts:
+                    return concepts[0].get("rxcui")
+
+        self._metrics.incr("rxnorm.ingredient.not_found")
+        return None
+
+    # ---- Private helpers ----
 
     async def _lookup_uncached(self, normalized, original, cid) -> RxcuiResult:
         url = f"{self._cfg.base_url}/rxcui.json?name={quote(normalized)}"
@@ -208,14 +260,16 @@ class RxNormClient:
                 self._metrics.incr("rxnorm.timeout")
                 logger.warning("rxnorm.timeout", extra={"drug": drug_name, "cid": cid, "attempt": attempt})
                 if attempt < self._cfg.max_attempts:
-                    await self._backoff(attempt); continue
+                    await self._backoff(attempt)
+                    continue
                 self._breaker.record_failure()
                 return RxcuiLookupFailed(drug_name, "timeout")
             except httpx.RequestError as e:
                 self._metrics.incr("rxnorm.network_error")
                 logger.warning("rxnorm.network", extra={"drug": drug_name, "cid": cid, "err": type(e).__name__})
                 if attempt < self._cfg.max_attempts:
-                    await self._backoff(attempt); continue
+                    await self._backoff(attempt)
+                    continue
                 self._breaker.record_failure()
                 return RxcuiLookupFailed(drug_name, "network")
 
@@ -229,11 +283,11 @@ class RxNormClient:
                     self._breaker.record_failure()
                     return RxcuiLookupFailed(drug_name, "malformed")
 
-            # Determine human-readable error message
             status_msg = self._http_status_message(status)
             if status == 429 or 500 <= status < 600:
                 if attempt < self._cfg.max_attempts:
-                    await self._backoff(attempt, resp); continue
+                    await self._backoff(attempt, resp)
+                    continue
                 self._breaker.record_failure()
                 return RxcuiLookupFailed(drug_name, status_msg)
 
@@ -243,7 +297,6 @@ class RxNormClient:
         return RxcuiLookupFailed(drug_name, "exhausted")
 
     def _http_status_message(self, status: int) -> str:
-        """Convert HTTP status code to human-readable error message."""
         status_map = {
             400: "http_400_bad_request",
             401: "http_401_unauthorized",

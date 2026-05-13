@@ -1,17 +1,21 @@
 from __future__ import annotations
-import logging
-from dataclasses import dataclass
-from typing import Protocol
-import httpx
+
 import asyncio
-import time
 import json
+import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Protocol
 from urllib.parse import quote
+
+import httpx
 
 from src.utils.validators import StageValidationError, validate_fda_response
 from src.utils.circuit_breaker import _CircuitBreaker
+
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class FDADrugData:
@@ -24,15 +28,16 @@ class FDADrugData:
     ask_doctor: list[str]
     source: str
     fetched_at: datetime
-    fda_label_id: str = "" 
+    fda_label_id: str = ""
+
 
 @dataclass(frozen=True)
 class FDAConfig:
     base_url: str = "https://api.fda.gov/drug"
     request_timeout_s: float = 10.0
     max_attempts: int = 2
-    base_backoff_s: float =1.0
-    max_backoff_s: float =5.0
+    base_backoff_s: float = 1.0
+    max_backoff_s: float = 5.0
     cache_ttl_s: float = 604_800
     breaker_threshold: int = 5
     breaker_cooldown_s: float = 60.0
@@ -50,49 +55,44 @@ class FDAClient:
         self._redis = redis_client
         self._breaker = _CircuitBreaker(
             self._cfg.breaker_threshold,
-            self._cfg.breaker_cooldown_s
+            self._cfg.breaker_cooldown_s,
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(
             timeout=self._cfg.request_timeout_s,
         )
+
     async def get_drug_data(
         self,
         drug_name: str,
         *,
         correlation_id: str | None = None,
     ) -> FDADrugData | None:
-
-        # Check Redis cache first
         if self._redis:
             cached = await self._redis.get(f"fda:{drug_name}")
             if cached:
-                # Handle Redis bytes serialization
                 if isinstance(cached, bytes):
                     cached = cached.decode("utf-8")
                 logger.info("fda.cache_hit drug=%s cid=%s", drug_name, correlation_id)
                 return self._deserialize(cached)
 
-        # Check circuit breaker
         if self._breaker.is_open():
             logger.warning("fda.circuit_open drug=%s", drug_name)
             return None
 
-        # Call FDA API
         result = await self._fetch_from_fda(drug_name, correlation_id)
         if result is None:
             return None
 
-        # Store in Redis
         if self._redis:
             await self._redis.setex(
                 f"fda:{drug_name}",
                 int(self._cfg.cache_ttl_s),
-                self._serialize(result)
+                self._serialize(result),
             )
 
         return result
-    
+
     def _serialize(self, data: FDADrugData) -> str:
         return json.dumps({
             "generic_name": data.generic_name,
@@ -117,7 +117,7 @@ class FDAClient:
             drug_interactions=d["drug_interactions"],
             do_not_use=d["do_not_use"],
             ask_doctor=d["ask_doctor"],
-            source="REDIS_CACHE",
+            source=d["source"],
             fetched_at=datetime.fromisoformat(d["fetched_at"]),
             fda_label_id=d.get("fda_label_id", ""),
         )
@@ -127,7 +127,6 @@ class FDAClient:
         drug_name: str,
         cid: str | None,
     ) -> FDADrugData | None:
-
         url = (
             f"{self._cfg.base_url}/label.json"
             f"?search=openfda.generic_name:{quote(drug_name)}&limit=1"
@@ -139,7 +138,7 @@ class FDAClient:
             except httpx.TimeoutException:
                 logger.warning(
                     "fda.timeout drug=%s attempt=%d cid=%s",
-                    drug_name, attempt, cid
+                    drug_name, attempt, cid,
                 )
                 if attempt < self._cfg.max_attempts:
                     await asyncio.sleep(self._cfg.base_backoff_s * attempt)
@@ -149,7 +148,7 @@ class FDAClient:
             except httpx.RequestError as e:
                 logger.warning(
                     "fda.network_error drug=%s error=%s cid=%s",
-                    drug_name, type(e).__name__, cid
+                    drug_name, type(e).__name__, cid,
                 )
                 self._breaker.record_failure()
                 return None
@@ -157,7 +156,7 @@ class FDAClient:
             if resp.status_code != 200:
                 logger.warning(
                     "fda.http_error drug=%s status=%d cid=%s",
-                    drug_name, resp.status_code, cid
+                    drug_name, resp.status_code, cid,
                 )
                 self._breaker.record_failure()
                 return None

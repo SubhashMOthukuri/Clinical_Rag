@@ -37,6 +37,7 @@ def make_store(conn=None, redis=None):
 def make_drug_row(
     drug_name="metformin",
     rxcui="6809",
+    ingredient_rxcui="12345",
     normalized_name="metformin",
     verified=True,
     lookup_count=1,
@@ -45,6 +46,7 @@ def make_drug_row(
     row = {
         "drug_name": drug_name,
         "rxcui": rxcui,
+        "ingredient_rxcui": ingredient_rxcui,
         "normalized_name": normalized_name,
         "verified": verified,
         "lookup_count": lookup_count,
@@ -67,7 +69,7 @@ class TestSaveDrugData:
         store, conn = make_store()
         conn.execute = AsyncMock()
 
-        await store.save_drug_data("Metformin", "6809", "metformin")
+        await store.save_drug_data("Metformin", "6809", "12345", "metformin")
 
         conn.execute.assert_called_once()
         sql, *args = conn.execute.call_args.args
@@ -80,7 +82,7 @@ class TestSaveDrugData:
         store, conn = make_store()
         conn.execute = AsyncMock()
 
-        await store.save_drug_data("ASPIRIN", "1191", "aspirin")
+        await store.save_drug_data("ASPIRIN", "1191", "54321", "aspirin")
 
         _, drug_name_arg, *_ = conn.execute.call_args.args
         assert drug_name_arg == "aspirin"
@@ -90,7 +92,7 @@ class TestSaveDrugData:
         store, conn = make_store()
         conn.execute = AsyncMock()
 
-        await store.save_drug_data("metformin", "6809", "metformin")
+        await store.save_drug_data("metformin", "6809", "12345", "metformin")
 
         sql = conn.execute.call_args.args[0]
         assert "ON CONFLICT" in sql
@@ -103,7 +105,7 @@ class TestSaveDrugData:
         conn.execute = AsyncMock(side_effect=Exception("DB connection lost"))
 
         with pytest.raises(Exception, match="DB connection lost"):
-            await store.save_drug_data("metformin", "6809", "metformin")
+            await store.save_drug_data("metformin", "6809", "12345", "metformin")
 
     @pytest.mark.asyncio
     async def test_db_failure_logs_error(self, caplog):
@@ -112,7 +114,7 @@ class TestSaveDrugData:
 
         with pytest.raises(Exception):
             with caplog.at_level("ERROR"):
-                await store.save_drug_data("metformin", "6809", "metformin")
+                await store.save_drug_data("metformin", "6809", "12345", "metformin")
 
         assert "drug_cache.save_failed" in caplog.text
         assert "metformin" in caplog.text
@@ -134,6 +136,7 @@ class TestGetDrugByName:
         assert isinstance(result, DrugRecord)
         assert result.drug_name == "metformin"
         assert result.rxcui == "6809"
+        assert result.ingredient_rxcui == "12345"
         assert result.verified is True
 
     @pytest.mark.asyncio

@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class DrugRecord:
     drug_name: str
     rxcui: str
+    ingredient_rxcui: str
     normalized_name: str
     verified: bool
     lookup_count: int
@@ -30,24 +31,29 @@ class DrugCacheStore:
         self,
         drug_name: str,
         rxcui: str,
+        ingredient_rxcui: str,
         normalized_name: str,
     ) -> None:
         try:
             async with self._db.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO drug_master (
-                        drug_name, rxcui, normalized_name,
+                        drug_name, rxcui, ingredient_rxcui, normalized_name,
                         verified, lookup_count, last_verified_at, created_at
-                    ) VALUES ($1, $2, $3, TRUE, 1, $4, $4)
+                    ) VALUES ($1, $2, $3, $4, TRUE, 1, $5, $5)
                     ON CONFLICT (drug_name) DO UPDATE SET
                         rxcui = EXCLUDED.rxcui,
+                        ingredient_rxcui = EXCLUDED.ingredient_rxcui,
                         normalized_name = EXCLUDED.normalized_name,
                         verified = TRUE,
                         lookup_count = drug_master.lookup_count + 1,
                         last_verified_at = EXCLUDED.last_verified_at
-                """, drug_name.lower(), rxcui, normalized_name,
+                """, drug_name.lower(), rxcui, ingredient_rxcui, normalized_name,
                      datetime.now(timezone.utc))
-                logger.info("drug_cache.saved drug=%s rxcui=%s", drug_name, rxcui)
+                logger.info(
+                    "drug_cache.saved drug=%s rxcui=%s ingredient_rxcui=%s",
+                    drug_name, rxcui, ingredient_rxcui,
+                )
         except Exception as e:
             logger.error("drug_cache.save_failed drug=%s error=%s", drug_name, e)
             raise
@@ -63,6 +69,7 @@ class DrugCacheStore:
                 return DrugRecord(
                     drug_name=drug_name,
                     rxcui=cached.decode(),
+                    ingredient_rxcui="",
                     normalized_name=drug_name,
                     verified=True,
                     lookup_count=0,
@@ -73,7 +80,7 @@ class DrugCacheStore:
         try:
             async with self._db.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT drug_name, rxcui, normalized_name,
+                    SELECT drug_name, rxcui, ingredient_rxcui, normalized_name,
                            verified, lookup_count,
                            last_verified_at, created_at
                     FROM drug_master
@@ -88,6 +95,7 @@ class DrugCacheStore:
                 return DrugRecord(
                     drug_name=row["drug_name"],
                     rxcui=row["rxcui"],
+                    ingredient_rxcui=row["ingredient_rxcui"],
                     normalized_name=row["normalized_name"],
                     verified=row["verified"],
                     lookup_count=row["lookup_count"],

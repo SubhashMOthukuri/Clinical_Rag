@@ -345,7 +345,9 @@ class TestRefreshRxnormCache:
 
         await store.refresh_rxnorm_cache(rxnorm)
 
-        redis.delete.assert_called_once_with("fda:metformin")
+        redis.delete.assert_any_call("fda:metformin")
+        redis.delete.assert_any_call("rxcui:metformin")
+        assert redis.delete.call_count == 2
 
     @pytest.mark.asyncio
     async def test_logs_completion_summary(self, caplog):
@@ -422,7 +424,7 @@ class TestRefreshSingle:
 
         await store._refresh_single("aspirin", rxnorm)
 
-        sql, rxcui_arg, _, drug_name_arg = conn.execute.call_args.args
+        sql, rxcui_arg, ingredient_rxcui_arg, _, drug_name_arg = conn.execute.call_args.args
         assert "UPDATE drug_master" in sql
         assert rxcui_arg == "9999"
         assert drug_name_arg == "aspirin"

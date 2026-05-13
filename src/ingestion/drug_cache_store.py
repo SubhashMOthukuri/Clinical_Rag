@@ -92,6 +92,14 @@ class DrugCacheStore:
                     return None
 
                 logger.info("drug_cache.hit drug=%s rxcui=%s", drug_name, row["rxcui"])
+
+                if self._redis:
+                    await self._redis.setex(
+                        f"rxcui:{drug_name}",
+                        86_400,
+                        row["rxcui"].encode(),
+                    )
+
                 return DrugRecord(
                     drug_name=row["drug_name"],
                     rxcui=row["rxcui"],
@@ -141,17 +149,20 @@ class DrugCacheStore:
         try:
             result = await rxnorm_client.get_rxcui(drug_name)
             if isinstance(result, RxcuiFound):
+                ingredient_rxcui = await rxnorm_client.get_ingredient_rxcui(result.rxcui) or ""
                 async with self._db.acquire() as conn:
                     await conn.execute("""
                         UPDATE drug_master
                         SET rxcui = $1,
-                            last_verified_at = $2,
+                            ingredient_rxcui = $2,
+                            last_verified_at = $3,
                             verified = TRUE
-                        WHERE drug_name = $3
-                    """, result.rxcui, datetime.now(timezone.utc), drug_name)
+                        WHERE drug_name = $4
+                    """, result.rxcui, ingredient_rxcui, datetime.now(timezone.utc), drug_name)
 
                 if self._redis:
                     await self._redis.delete(f"fda:{drug_name}")
+                    await self._redis.delete(f"rxcui:{drug_name}")
 
                 return True
             return False

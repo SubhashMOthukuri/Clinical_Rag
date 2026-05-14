@@ -4,8 +4,11 @@ Unit tests for src/retrieval/interaction_checker.py
 Tests cover:
 - InteractionChecker.__init__: config defaults, optional dependencies
 - InteractionChecker._build_context: name lowercasing, unit mapping, rxcui fallback
+- InteractionChecker._estimate_severity: RED keywords, YELLOW keywords, UNKNOWN fallback,
+  RED priority over YELLOW, case-insensitive, custom keyword config
 - InteractionChecker._check_pair: each FDA label field, min_evidence_length filter,
-  case-insensitive matching, both-direction scanning, missing FDA data
+  case-insensitive matching, both-direction scanning, missing FDA data,
+  estimated_severity set on returned evidence
 - InteractionChecker.check: happy path, deduplication, pair capping,
   missing FDA data, no evidence, logging
 """
@@ -490,6 +493,163 @@ class TestCheck:
         }
         result = checker.check(meds, fda_map)
         assert all(isinstance(ev, InteractionEvidence) for ev in result)
+
+
+# ============================================================================
+# _estimate_severity
+# ============================================================================
+
+class TestEstimateSeverity:
+
+    def test_returns_red_for_contraindicated(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("This combination is contraindicated.") == "RED"
+
+    def test_returns_red_for_do_not_use(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Do not use with warfarin.") == "RED"
+
+    def test_returns_red_for_avoid(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Avoid concurrent use with NSAIDs.") == "RED"
+
+    def test_returns_red_for_fatal(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Fatal interactions have been reported.") == "RED"
+
+    def test_returns_red_for_life_threatening(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("May cause life-threatening arrhythmia.") == "RED"
+
+    def test_returns_red_for_serious(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Serious adverse reactions may occur.") == "RED"
+
+    def test_returns_red_for_severe(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Severe hypotension has been observed.") == "RED"
+
+    def test_returns_yellow_for_monitor(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Monitor blood pressure closely.") == "YELLOW"
+
+    def test_returns_yellow_for_caution(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Use with caution in elderly patients.") == "YELLOW"
+
+    def test_returns_yellow_for_may_increase(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("May increase the risk of bleeding.") == "YELLOW"
+
+    def test_returns_yellow_for_may_decrease(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("May decrease effectiveness of the drug.") == "YELLOW"
+
+    def test_returns_yellow_for_adjust_dose(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Adjust dose when used concomitantly.") == "YELLOW"
+
+    def test_returns_yellow_for_use_with_caution(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Use with caution when combining these agents.") == "YELLOW"
+
+    def test_returns_unknown_when_no_keywords_match(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("Take with food to reduce GI upset.") == "UNKNOWN"
+
+    def test_red_takes_priority_over_yellow(self):
+        """Text containing both a RED and YELLOW keyword must return RED."""
+        checker = InteractionChecker()
+        text = "Serious interaction — monitor closely."
+        assert checker._estimate_severity(text) == "RED"
+
+    def test_keyword_match_is_case_insensitive(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("CONTRAINDICATED in renal failure.") == "RED"
+        assert checker._estimate_severity("MONITOR INR weekly.") == "YELLOW"
+
+    def test_custom_red_keywords_via_config(self):
+        config = InteractionCheckerConfig(red_keywords=("danger",), yellow_keywords=())
+        checker = InteractionChecker(config=config)
+        assert checker._estimate_severity("This is danger to the patient.") == "RED"
+        assert checker._estimate_severity("Serious reaction reported.") == "UNKNOWN"
+
+    def test_custom_yellow_keywords_via_config(self):
+        config = InteractionCheckerConfig(red_keywords=(), yellow_keywords=("watch",))
+        checker = InteractionChecker(config=config)
+        assert checker._estimate_severity("Watch for signs of toxicity.") == "YELLOW"
+
+    def test_empty_string_returns_unknown(self):
+        checker = InteractionChecker()
+        assert checker._estimate_severity("") == "UNKNOWN"
+
+
+# ============================================================================
+# estimated_severity set in _check_pair and propagated through check()
+# ============================================================================
+
+class TestSeverityIntegration:
+
+    def test_check_pair_sets_red_severity(self):
+        checker = InteractionChecker()
+        ctx_a = make_context(name="aspirin")
+        ctx_b = make_context(name="warfarin")
+        fda_map = {
+            "aspirin": make_fda_data(
+                drug_interactions=["Contraindicated with warfarin due to serious bleeding risk."]
+            ),
+            "warfarin": make_fda_data(),
+        }
+        results = checker._check_pair(ctx_a, ctx_b, fda_map)
+        assert results[0].estimated_severity == "RED"
+
+    def test_check_pair_sets_yellow_severity(self):
+        checker = InteractionChecker()
+        ctx_a = make_context(name="ibuprofen")
+        ctx_b = make_context(name="lisinopril")
+        fda_map = {
+            "ibuprofen": make_fda_data(
+                warnings=["Monitor blood pressure when using lisinopril concomitantly."]
+            ),
+            "lisinopril": make_fda_data(),
+        }
+        results = checker._check_pair(ctx_a, ctx_b, fda_map)
+        assert results[0].estimated_severity == "YELLOW"
+
+    def test_check_pair_sets_unknown_severity(self):
+        checker = InteractionChecker()
+        ctx_a = make_context(name="metformin")
+        ctx_b = make_context(name="aspirin")
+        fda_map = {
+            "metformin": make_fda_data(
+                drug_interactions=["Aspirin may alter metformin absorption in some patients."]
+            ),
+            "aspirin": make_fda_data(),
+        }
+        results = checker._check_pair(ctx_a, ctx_b, fda_map)
+        assert results[0].estimated_severity == "UNKNOWN"
+
+    def test_check_returns_evidence_with_severity_set(self):
+        checker = InteractionChecker()
+        meds = [make_medication("aspirin"), make_medication("warfarin")]
+        fda_map = {
+            "aspirin": make_fda_data(
+                drug_interactions=["Contraindicated with warfarin — fatal bleeding events reported."]
+            ),
+            "warfarin": make_fda_data(),
+        }
+        result = checker.check(meds, fda_map)
+        assert result[0].estimated_severity == "RED"
+
+    def test_estimated_severity_default_is_unknown(self):
+        ctx = make_context()
+        ev = InteractionEvidence(
+            drug_a=ctx,
+            drug_b=ctx,
+            evidence_text="some text",
+            source_drug="aspirin",
+        )
+        assert ev.estimated_severity == "UNKNOWN"
 
 
 if __name__ == "__main__":

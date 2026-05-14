@@ -27,6 +27,7 @@ class InteractionEvidence:
     drug_b: DrugContext
     evidence_text: str
     source_drug: str  # which drug's FDA label contained the evidence
+    estimated_severity: str = "UNKNOWN"  # RED | YELLOW | UNKNOWN — hint for LLM, not final
     data_source: str = "FRESH_FDA"
 
 
@@ -35,6 +36,24 @@ class InteractionCheckerConfig:
     min_evidence_length: int = 20
     max_pairs_per_request: int = 100
     batch_size: int = 20
+    # Keyword lists drive the pre-filter. RED checked first; first match wins.
+    red_keywords: tuple = (
+        "contraindicated",
+        "do not use",
+        "avoid",
+        "fatal",
+        "life-threatening",
+        "serious",
+        "severe",
+    )
+    yellow_keywords: tuple = (
+        "monitor",
+        "caution",
+        "may increase",
+        "may decrease",
+        "adjust dose",
+        "use with caution",
+    )
 
 
 class InteractionChecker:
@@ -110,6 +129,22 @@ class InteractionChecker:
 
     # ---- Private helpers ----
 
+    def _estimate_severity(self, evidence_text: str) -> str:
+        """Keyword-based pre-classification to guide the LLM.
+
+        RED keywords are checked first so a text containing both "serious" and
+        "monitor" is correctly labelled RED, not YELLOW.
+        This is a hint only — the LLM makes the final severity decision.
+        """
+        text_lower = evidence_text.lower()
+        for keyword in self._cfg.red_keywords:
+            if keyword in text_lower:
+                return "RED"
+        for keyword in self._cfg.yellow_keywords:
+            if keyword in text_lower:
+                return "YELLOW"
+        return "UNKNOWN"
+
     @staticmethod
     def _build_context(med: Medication, fda: FDADrugData) -> DrugContext:
         return DrugContext(
@@ -151,6 +186,7 @@ class InteractionChecker:
                         drug_b=target_ctx,
                         evidence_text=text,
                         source_drug=source_ctx.name,
+                        estimated_severity=self._estimate_severity(text),
                     ))
 
         return results

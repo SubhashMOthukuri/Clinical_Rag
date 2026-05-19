@@ -100,13 +100,33 @@ class TestInjectionAttacks:
             )
 
     def test_rejects_special_chars_in_rxcui(self):
-        """Test RXCUI only accepts digits."""
+        """Test rxcui only accepts digits."""
         with pytest.raises(ValidationError):
             Medication(
                 name="aspirin",
                 dose=100.0,
                 unit=Unit.MG,
                 rxcui="123; DROP TABLE;"
+            )
+
+    def test_rejects_special_chars_in_ingredient_rxcui(self):
+        """Test ingredient_rxcui only accepts digits."""
+        with pytest.raises(ValidationError):
+            Medication(
+                name="aspirin",
+                dose=100.0,
+                unit=Unit.MG,
+                ingredient_rxcui="6809'; DROP TABLE;"
+            )
+
+    def test_rejects_non_numeric_ingredient_rxcui(self):
+        """Test ingredient_rxcui rejects alphabetic input."""
+        with pytest.raises(ValidationError):
+            Medication(
+                name="aspirin",
+                dose=100.0,
+                unit=Unit.MG,
+                ingredient_rxcui="ABCDEF"
             )
 
     def test_rejects_special_chars_in_patient_id(self):
@@ -340,7 +360,8 @@ class TestValidationPipeline:
             dose=500.0,
             unit=Unit.MG,
             frequency="twice daily",
-            rxcui="6809"
+            rxcui="860975",
+            ingredient_rxcui="6809"
         )
         
         request = ReconciliationRequest(

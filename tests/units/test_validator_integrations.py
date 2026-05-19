@@ -413,7 +413,7 @@ class TestEdgeCases:
     def test_max_medications_request(self):
         """Test maximum: 50 medications."""
         meds = [
-            Medication(name=f"drug_{i}", dose=100.0, unit=Unit.MG)
+            Medication(name=f"drug{i}", dose=100.0, unit=Unit.MG)
             for i in range(50)
         ]
         req = ReconciliationRequest(medications=meds)

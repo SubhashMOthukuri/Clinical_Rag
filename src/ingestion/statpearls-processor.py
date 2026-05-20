@@ -10,35 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from src.chunking import ArticleChunk, ChunkConfig, TextChunker
+
 logger = logging.getLogger(__name__)
 
 FILE_TIMEOUT_S = 30  # max seconds allowed per XML file before it is skipped
-
-
-@dataclass
-class ChunkConfig:
-    max_chunk_size: int = 1000
-    min_chunk_size: int = 200
-    overlap_size: int = 100
-    include_title: bool = True  # TODO(prod): field defined but never read — wire into _assign_ids prefix logic or remove
-
-    def __post_init__(self) -> None:
-        if self.overlap_size >= self.max_chunk_size:
-            raise ValueError("overlap_size must be less than max_chunk_size")
-
-
-@dataclass(frozen=True)
-class ArticleChunk:
-    chunk_id: str
-    article_id: str
-    title: str
-    section: str
-    chunk_index: int
-    total_chunks: int
-    content: str
-    char_count: int
-    article_type: str = "general"
-    source: str = "StatPearls"
 
 
 @dataclass
@@ -58,6 +34,7 @@ class Article:
 class StatPearlsProcessor:
     def __init__(self, config: ChunkConfig | None = None):
         self._cfg = config or ChunkConfig()
+        self._chunker = TextChunker(self._cfg)
 
     def process_file(
         self,
@@ -75,13 +52,12 @@ class StatPearlsProcessor:
         sections = self._extract_sections(root)
         article_type = self._detect_article_type(title, sections)
 
-        # Carry section title alongside each chunk
         tagged: list[tuple[str, str]] = []
         for section_title, section_text in sections:
-            for chunk_text in self._chunk_text(section_text):
+            for chunk_text in self._chunker.chunk_text(section_text):
                 tagged.append((section_title, chunk_text))
 
-        return self._assign_ids(tagged, article_id, title, article_type)
+        return self._chunker.assign_ids(tagged, article_id, title, article_type)
 
     def _extract_title(self, root: ET.Element) -> str:
         for tag in ["title", "article-title"]:
@@ -135,56 +111,6 @@ class StatPearlsProcessor:
     def _get_element_text(self, element: ET.Element) -> str:
         text = "".join(element.itertext())
         return self._clean_text(text)
-
-    def _chunk_text(self, text: str, cfg: ChunkConfig | None = None) -> list[str]:
-        cfg = cfg or self._cfg
-        if len(text) <= cfg.max_chunk_size:
-            return [text]
-
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = start + cfg.max_chunk_size
-
-            if end < len(text):
-                boundary = text.rfind(".", start, end)
-                if boundary > start + cfg.min_chunk_size:
-                    end = boundary + 1
-
-            chunk = text[start:end].strip()
-            if len(chunk) >= cfg.min_chunk_size:
-                chunks.append(chunk)
-
-            next_start = end - cfg.overlap_size
-            if next_start <= start:
-                next_start = start + 1
-            start = next_start
-
-        return chunks
-
-    def _assign_ids(
-        self,
-        tagged_chunks: list[tuple[str, str]],
-        article_id: str,
-        title: str,
-        article_type: str,
-    ) -> list[ArticleChunk]:
-        total = len(tagged_chunks)
-        result = []
-        for idx, (section, content) in enumerate(tagged_chunks):
-            result.append(ArticleChunk(
-                chunk_id=f"{article_id}_chunk_{idx:04d}",
-                article_id=article_id,
-                title=title,
-                section=section,
-                chunk_index=idx,
-                total_chunks=total,
-                content=content,
-                char_count=len(content),
-                article_type=article_type,
-                source="StatPearls",
-            ))
-        return result
 
     # TODO(prod): keyword match misclassifies — "drug abuse" → drug_interaction, anatomy article with "drug" in one sentence → mislabelled
     def _detect_article_type(
@@ -251,35 +177,6 @@ class StatPearlsProcessor:
         with open(tmp, "w") as f:
             json.dump(list(processed_ids), f)
         os.replace(tmp, path)
-
-    # ---- Pass 2 helpers ----
-
-    def _chunk_article(self, article_dict: dict, cfg: ChunkConfig) -> list[dict]:
-        """Turn one Article dict (from Pass 1 JSONL) into a list of chunk dicts."""
-        article_id = article_dict["article_id"]
-        title = article_dict["title"]
-        article_type = article_dict["article_type"]
-
-        tagged: list[tuple[str, str]] = []
-        for section in article_dict["sections"]:
-            for chunk_text in self._chunk_text(section["text"], cfg):
-                tagged.append((section["title"], chunk_text))
-
-        return [
-            {
-                "chunk_id": c.chunk_id,
-                "article_id": c.article_id,
-                "title": c.title,
-                "section": c.section,
-                "chunk_index": c.chunk_index,
-                "total_chunks": c.total_chunks,
-                "content": c.content,
-                "char_count": c.char_count,
-                "article_type": c.article_type,
-                "source": c.source,
-            }
-            for c in self._assign_ids(tagged, article_id, title, article_type)
-        ]
 
     # ---- Public pipeline methods ----
 
@@ -408,6 +305,7 @@ class StatPearlsProcessor:
         .tmp file and atomically replaced so output_path is never half-written.
         """
         cfg = config or self._cfg
+        chunker = TextChunker(cfg)
         total_articles = 0
         total_chunks = 0
         failed_articles = 0
@@ -424,7 +322,7 @@ class StatPearlsProcessor:
                     try:
                         article_dict = json.loads(line)
                         article_id = article_dict.get("article_id", "unknown")
-                        chunks = self._chunk_article(article_dict, cfg)
+                        chunks = chunker.chunk_article(article_dict, cfg)
                         for chunk in chunks:
                             dst.write(json.dumps(chunk) + "\n")
                             total_chunks += 1

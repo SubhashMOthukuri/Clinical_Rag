@@ -12,7 +12,7 @@ from urllib.parse import quote
 import httpx
 
 from src.utils.validators import StageValidationError, validate_rxnorm_response
-from src.utils.circuit_breaker import _CircuitBreaker
+from src.resilience.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class RxNormClient:
         self._cfg = config or RxNormConfig()
         self._metrics = metrics or _NoopMetrics()
         self._cache = _TTLCacheWithSingleflight(self._cfg.cache_size, self._cfg.cache_ttl_s)
-        self._breaker = _CircuitBreaker(self._cfg.breaker_threshold, self._cfg.breaker_cooldown_s)
+        self._breaker = CircuitBreaker(self._cfg.breaker_threshold, self._cfg.breaker_cooldown_s)
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(
             timeout=self._cfg.request_timeout_s,

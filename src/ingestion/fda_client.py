@@ -12,7 +12,7 @@ from urllib.parse import quote
 import httpx
 
 from src.utils.validators import StageValidationError, validate_fda_response
-from src.utils.circuit_breaker import _CircuitBreaker
+from src.resilience.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class FDAClient:
     ):
         self._cfg = config or FDAConfig()
         self._redis = redis_client
-        self._breaker = _CircuitBreaker(
+        self._breaker = CircuitBreaker(
             self._cfg.breaker_threshold,
             self._cfg.breaker_cooldown_s,
         )

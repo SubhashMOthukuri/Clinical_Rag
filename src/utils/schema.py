@@ -49,7 +49,7 @@ PROD_CONFIG = ConfigDict(
 
 class Medication(BaseModel):
     model_config = PROD_CONFIG
-    name: str = Field(min_length=2, max_length=100)
+    name: str = Field(min_length=2, max_length=100, pattern= r"^[A-Za-z0-9 ,.\-]+$")
     dose: float = Field(gt=0, le=10000)
     unit: Unit
     frequency: Optional[str] = Field(default=None, max_length=50)

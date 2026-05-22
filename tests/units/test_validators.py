@@ -183,7 +183,7 @@ class TestReconciliationRequest:
     def test_request_too_many_medications(self):
         """Test request max 50 medications."""
         meds = [
-            Medication(name=f"drug_{i}", dose=100.0, unit=Unit.MG)
+            Medication(name=f"drug{i}", dose=100.0, unit=Unit.MG)
             for i in range(51)
         ]
         with pytest.raises(ValidationError) as exc:

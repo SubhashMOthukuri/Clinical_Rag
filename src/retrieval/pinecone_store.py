@@ -253,6 +253,8 @@ class PineconeStore:
 # [ ] Batch upsert chunking — split >100 records into sub-batches internally
 # [ ] Metrics: pinecone_query_total{status}, pinecone_query_latency_seconds
 # [ ] Metrics: pinecone_upsert_total{status}, vectors_upserted_total
+#  Read the actual retry value instead of guessing 1s. For MVP, hardcoded 1.0 is fine.
+
 
 # ============================================================================
 # PROD TODOs

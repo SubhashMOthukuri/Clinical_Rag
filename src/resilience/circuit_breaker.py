@@ -20,11 +20,11 @@ class CircuitBreaker:
         OPEN   — too many failures, calls fail fast for cooldown_s seconds
     """
 
-    def __init__(self, threshold: int = 5, cooldown_s: float = 30):
+    def __init__(self, threshold: int = 5, cooldown_s: int = 30):
         if threshold < 1:
             raise ValueError("threshold must be >= 1")
-        if cooldown_s <= 0:
-            raise ValueError("cooldown_s must be > 0")
+        if cooldown_s < 1:
+            raise ValueError("cooldown_s must be >= 1")
         self._threshold = threshold
         self._cooldown = cooldown_s
         self._failures = 0

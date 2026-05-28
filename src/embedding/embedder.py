@@ -1,13 +1,13 @@
 """Embedder module: text → vectors.
 
-Single responsibility: turn text into 768-dim vectors using OpenAI's API.
+Single responsibility: turn text into vectors using OpenAI's or Gemini's API.
 Does NOT know about Pinecone, chunks, metadata, or storage.
 Caller (ingest script or retriever) handles wiring vectors to downstream systems.
 
 Failure handling:
 - Empty/oversized input → EmbedderInvalidInput (programmer bug, do not swallow)
 - OpenAI rate limit (429) → EmbedderRateLimited (caller retries with backoff)
-- OpenAI timeout → EmbedderTimeout (caller falls back to FDA)
+- OpenAI/Gemini timeout → EmbedderTimeout (caller falls back to FDA)
 - Circuit breaker open → EmbedderUnavailable (fail fast)
 - Generic API failure → EmbedderUnavailable + breaker.record_failure()
 """
@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from typing import Protocol, Sequence
 
 import openai
 import tiktoken
+from google import genai
+from google.genai import types
 from openai import AsyncOpenAI
 
 from src.exceptions.embedder import (
@@ -331,6 +334,197 @@ class OpenAIEmbedder:
                 )
                 # TODO(phase 2): counter embedder_batch_total{status="success"}
                 # TODO(phase 2): histogram embedder_batch_latency_seconds
+
+        return all_vectors
+
+
+# ====== Helpers ======
+def _normalize(v: list[float]) -> list[float]:
+    """Return unit-length copy of v. Gemini truncated vectors aren't unit-length."""
+    norm = math.sqrt(sum(x * x for x in v))
+    if norm == 0.0:
+        return v
+    return [x / norm for x in v]
+
+
+# ====== Gemini Implementation ======
+class GeminiEmbedder:
+    """Gemini implementation of Embedder protocol.
+
+    Uses text-embedding-004 with output_dimensionality=768 to match Pinecone index.
+    Gemini embed is sync-only → asyncio.to_thread + wait_for for timeout, identical
+    to the pattern used in Generator._call_llm.
+    """
+
+    DEFAULT_MODEL = "gemini-embedding-001"
+    DEFAULT_DIMENSIONS = 768
+    DEFAULT_MAX_INPUT_TOKENS = 2048  # text-embedding-004 limit
+    DEFAULT_SINGLE_TIMEOUT_S = 5.0
+    DEFAULT_BATCH_TIMEOUT_S = 15.0
+    DEFAULT_BREAKER_THRESHOLD = 5
+    DEFAULT_BREAKER_COOLDOWN_S = 30
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = DEFAULT_MODEL,
+        dimensions: int = DEFAULT_DIMENSIONS,
+        single_timeout_s: float = DEFAULT_SINGLE_TIMEOUT_S,
+        batch_timeout_s: float = DEFAULT_BATCH_TIMEOUT_S,
+        breaker_threshold: int = DEFAULT_BREAKER_THRESHOLD,
+        breaker_cooldown_s: int = DEFAULT_BREAKER_COOLDOWN_S,
+        client: genai.Client | None = None,
+    ):
+        self._client = client or genai.Client(api_key=api_key)
+        self._model = model
+        self._dimensions = dimensions
+        self._max_input_tokens = self.DEFAULT_MAX_INPUT_TOKENS
+        self._single_timeout_s = single_timeout_s
+        self._batch_timeout_s = batch_timeout_s
+        self._circuit_breaker = CircuitBreaker(
+            threshold=breaker_threshold,
+            cooldown_s=breaker_cooldown_s,
+        )
+
+    def __repr__(self) -> str:
+        return f"GeminiEmbedder(model={self._model}, dimensions={self._dimensions})"
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    @property
+    def max_input_tokens(self) -> int:
+        return self._max_input_tokens
+
+    async def embed(
+        self, text: str, *, correlation_id: str | None = None
+    ) -> list[float]:
+        log_ctx = {"cid": correlation_id}
+
+        if not text or not text.strip():
+            raise EmbedderInvalidInput("Text is empty")
+
+        if self._circuit_breaker.is_open():
+            raise EmbedderUnavailable("Circuit breaker is open")
+
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._client.models.embed_content,
+                    model=self._model,
+                    contents=text,
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=self._dimensions
+                    ),
+                ),
+                timeout=self._single_timeout_s,
+            )
+            vector = _normalize(list(response.embeddings[0].values))
+        except asyncio.TimeoutError:
+            self._circuit_breaker.record_failure()
+            logger.warning(
+                "gemini_embedder.timeout",
+                extra={**log_ctx, "text_len": len(text)},
+            )
+            raise EmbedderTimeout(
+                f"Gemini embed call exceeded {self._single_timeout_s}s"
+            )
+        except Exception as e:
+            self._circuit_breaker.record_failure()
+            logger.error(
+                "gemini_embedder.failure",
+                extra={**log_ctx, "error": str(e), "error_type": type(e).__name__},
+            )
+            raise EmbedderUnavailable(f"Gemini failed: {e}") from e
+
+        self._circuit_breaker.record_success()
+        return vector
+
+    async def embed_batch(
+        self,
+        texts: Sequence[str],
+        batch_size: int = 100,
+        *,
+        correlation_id: str | None = None,
+    ) -> list[list[float]]:
+        log_ctx = {"cid": correlation_id}
+
+        if not texts:
+            return []
+
+        for i, text in enumerate(texts):
+            if not text or not text.strip():
+                raise EmbedderInvalidInput(f"Empty text at index {i}")
+
+        all_vectors: list[list[float]] = []
+        total = len(texts)
+
+        for batch_start in range(0, total, batch_size):
+            batch = texts[batch_start : batch_start + batch_size]
+            batch_num = batch_start // batch_size + 1
+
+            if self._circuit_breaker.is_open():
+                raise EmbedderUnavailable(
+                    f"Circuit breaker open at batch {batch_num} "
+                    f"(completed {len(all_vectors)}/{total})"
+                )
+
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._client.models.embed_content,
+                        model=self._model,
+                        contents=list(batch),
+                        config=types.EmbedContentConfig(
+                            output_dimensionality=self._dimensions
+                        ),
+                    ),
+                    timeout=self._batch_timeout_s,
+                )
+
+                batch_vectors = [
+                    _normalize(list(emb.values)) for emb in response.embeddings
+                ]
+
+                if len(batch_vectors) != len(batch):
+                    self._circuit_breaker.record_failure()
+                    raise EmbedderUnavailable(
+                        f"Batch {batch_num}: expected {len(batch)} vectors, "
+                        f"got {len(batch_vectors)}"
+                    )
+
+                all_vectors.extend(batch_vectors)
+
+            except asyncio.TimeoutError:
+                self._circuit_breaker.record_failure()
+                logger.warning(
+                    "gemini_embedder.batch_timeout",
+                    extra={**log_ctx, "batch_num": batch_num, "batch_size": len(batch)},
+                )
+                raise EmbedderTimeout(
+                    f"Batch {batch_num} exceeded {self._batch_timeout_s}s"
+                )
+            except EmbedderUnavailable:
+                raise
+            except Exception as e:
+                self._circuit_breaker.record_failure()
+                logger.error(
+                    "gemini_embedder.batch_failure",
+                    extra={**log_ctx, "batch_num": batch_num, "error": str(e)},
+                )
+                raise EmbedderUnavailable(f"Batch {batch_num} failed: {e}") from e
+
+            self._circuit_breaker.record_success()
+            logger.info(
+                "gemini_embedder.batch_complete",
+                extra={
+                    **log_ctx,
+                    "batch_num": batch_num,
+                    "done": len(all_vectors),
+                    "total": total,
+                },
+            )
 
         return all_vectors
 

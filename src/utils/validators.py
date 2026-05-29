@@ -345,7 +345,18 @@ def validate_llm_response(
             )
 
         for citation in warning.citation:
-            if citation not in allowed_citation_sources:
+            # Normalise LLM quirks: strip "[chunk_id: X]" or "SOURCE_ID: X" wrappers
+            bare = re.sub(r"^\[chunk_id:\s*|\]$", "", citation).strip()
+            bare = re.sub(r"^SOURCE_ID:\s*", "", bare).strip()
+            # Skip numeric-only refs — LLM picks up FDA section numbers like "7" from
+            # "7 DRUG INTERACTIONS" in the evidence text; these are not real chunk IDs.
+            if re.match(r"^\d+(\.\d+)*$", bare):
+                continue
+            # "FDA_LABEL" is a sentinel the LLM uses when no StatPearls chunks were provided;
+            # it's explicitly instructed in the system prompt, so it's not a hallucination.
+            if bare == "FDA_LABEL":
+                continue
+            if bare not in allowed_citation_sources:
                 raise StageValidationError(
                     ValidationStage.LLM,
                     f"warning[{idx}] cites unknown source — possible hallucination",

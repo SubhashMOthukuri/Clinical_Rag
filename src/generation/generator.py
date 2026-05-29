@@ -160,7 +160,7 @@ class Generator:
         return DrugWarning(
             drugs_involved=[evidence.drug_a.name, evidence.drug_b.name],
             severity=severity,
-            reaction_result=evidence.evidence_text,
+            reaction_result=evidence.evidence_text[:997] + "..." if len(evidence.evidence_text) > 1000 else evidence.evidence_text,
             action=Action.CONSULT_DOCTOR,
             citation=["FDA_LABEL"],
             nurse_summary_to_doctor=(

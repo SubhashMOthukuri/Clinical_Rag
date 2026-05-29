@@ -18,6 +18,7 @@ from api.middleware.correlation_id import correlation_id_middleware
 from api.routes.health import router as health_router
 from api.routes.reconcile import router as reconcile_router
 from src.config.config import (
+    OPENAI_API_KEY,
     GEMINI_API_KEY,
     GEMINI_MODEL,
     GROQ_API_KEY,
@@ -25,7 +26,7 @@ from src.config.config import (
     PINECONE_API_KEY,
     PINECONE_INDEX_NAME,
 )
-from src.embedding.embedder import GeminiEmbedder
+from src.embedding.embedder import OpenAIEmbedder
 from src.generation.generator import Generator
 from src.ingestion.fda_client import FDAClient
 from src.ingestion.rxnorm_client import RxNormClient
@@ -55,13 +56,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("startup.begin")
 
-    embedder = GeminiEmbedder(api_key=GEMINI_API_KEY)
+    embedder = OpenAIEmbedder(api_key=OPENAI_API_KEY)
     store = PineconeStore(
         api_key=PINECONE_API_KEY,
         index_name=PINECONE_INDEX_NAME,
         dimensions=768,
     )
-    retriever = Retriever(embedder=embedder, store=store)
+    retriever = Retriever(embedder=embedder, store=store, namespace="full_v1")
     rxnorm = RxNormClient()
     fda = FDAClient()
     interaction_checker = InteractionChecker(db_pool=None, redis_client=None)
@@ -86,6 +87,7 @@ async def lifespan(app: FastAPI):
     logger.info("shutdown.begin")
     await embedder.close()
     await store.close()
+
     await rxnorm.aclose()
     await fda.aclose()
     logger.info("shutdown.complete")

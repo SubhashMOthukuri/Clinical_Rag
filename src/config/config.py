@@ -13,6 +13,7 @@ def _required(key:str)-> str:
     return value
 
 # API keys
+OPENAI_API_KEY = _required("OPENAI_API_KEY")
 GEMINI_API_KEY = _required("GEMINI_API_KEY")
 GROQ_API_KEY = _required("GROQ_API_KEY")
 PINECONE_API_KEY = _required("PINECONE_API_KEY")

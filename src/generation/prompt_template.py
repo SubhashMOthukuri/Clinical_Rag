@@ -5,14 +5,15 @@ from src.retrieval.interaction_checker import InteractionEvidence
 
 SYSTEM_PROMPT = """You are a clinical drug interaction assistant for use at the point of care.
 
-You receive FDA interaction evidence and StatPearls clinical text chunks for one drug pair. Classify the interaction and explain it.
+You receive FDA background evidence and StatPearls clinical text chunks for one drug pair. Classify the interaction and explain it.
 
 STRICT RULES:
 1. Use ONLY the provided FDA evidence and StatPearls chunks. Never add outside knowledge.
-2. Every claim MUST cite at least one source by its chunk ID.
-3. If the evidence does not support a claim, do not make it.
-4. Be factual and clinical. No speculation, no creativity.
-5. Reference only the two drugs provided.
+2. Citations MUST be SOURCE_IDs from the StatPearls chunks (format: "article-XXXXX_chunk_YYYY"). The FDA evidence is background context — do NOT cite FDA section numbers (e.g. "7", "7.1") as sources.
+3. If no StatPearls chunks are provided, set citation to ["FDA_LABEL"] and base your answer on the FDA evidence only.
+4. If the evidence does not support a claim, do not make it.
+5. Be factual and clinical. No speculation, no creativity.
+6. Reference only the two drugs provided.
 
 OUTPUT FORMAT — return ONLY a JSON array with exactly one object:
 [
@@ -21,9 +22,9 @@ OUTPUT FORMAT — return ONLY a JSON array with exactly one object:
     "severity": "RED" | "YELLOW" | "GREEN",
     "reaction_result": "clinical explanation grounded in the sources",
     "action": "STOP" | "MONITOR" | "CONSULT_DOCTOR",
-    "citation": ["chunk_id_used", "..."],
+    "citation": ["article-XXXXX_chunk_YYYY", "..."],
     "nurse_summary_to_doctor": "concise actionable summary",
-    "confidence": 0.0
+    "confidence": 0.85
   }
 ]
 
@@ -39,13 +40,19 @@ def build_user_prompt(evidence: InteractionEvidence, chunks: list[QueryResult])-
     else:
         lines= []
         for c in chunks:
-            lines.append(f"[chunk_id: {c.id}]\n {c.metadata.text}")
+            lines.append(f"SOURCE_ID: {c.id}\n{c.metadata.text}")
         chunk_block = "\n\n".join(lines)
-    return f""" Durg pair : {drug_a} and {drug_b}
-FDA interaction evidence: {fda_evidence}
+    return f"""Drug pair: {drug_a} and {drug_b}
+
+FDA background evidence (context only — do NOT cite section numbers from this):
+{fda_evidence}
+
 Preliminary severity hint (not final): {severity}
-StatPearls clinicla context: {chunk_block}
-Task: Classify the interaction severity, explain the clinical reaction grounded in the sources above, and cite the chunk IDs you used. Return a JSON array with one DrugWarning object.
+
+StatPearls clinical context (cite using SOURCE_ID values below):
+{chunk_block}
+
+Task: Classify the interaction severity, explain the clinical reaction grounded in the sources above, and populate the citation array with the SOURCE_IDs of StatPearls chunks you used. Return a JSON array with one DrugWarning object.
 """
 
 

@@ -99,10 +99,10 @@ async def reconcile(
     # Step 6: generate DrugWarnings per evidence pair (parallel LLM calls)
     warnings = await generator.generate_many(retrieval_results, correlation_id=cid)
 
-    # Step 7: assemble response — any FDA-only fallback warning → PARTIAL
+    # Step 7: assemble response — FDA-only fallback (citation=["FDA_LABEL"]) → PARTIAL
     elapsed_ms = (time.perf_counter() - t0) * 1000
     response_status = (
-        Status.PARTIAL if any(w.confidence < 1.0 for w in warnings) else Status.SUCCESS
+        Status.PARTIAL if any("FDA_LABEL" in w.citation for w in warnings) else Status.SUCCESS
     )
     response = _build_response(
         medications=enriched_meds,

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from src.utils.metrics import mvp_metrics
+
 router = APIRouter()
 
 
@@ -22,3 +24,9 @@ async def health(request: Request) -> dict:
             "fda": hasattr(request.app.state, "fda"),
         },
     }
+
+
+@router.get("/metrics")
+async def metrics() -> dict:
+    """Point-in-time snapshot of all MVP counters and latency histograms."""
+    return mvp_metrics.snapshot()

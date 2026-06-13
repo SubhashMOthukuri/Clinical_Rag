@@ -12,6 +12,7 @@ from src.retrieval.interaction_checker import InteractionEvidence
 from src.exceptions.retrieval import (RerankerUnavailable,RetrievalError)
 from src.exceptions.embedder import EmbedderError
 from src.exceptions.pinecone import PineconeStoreError
+from src.utils.metrics import mvp_metrics, M
 
 logger = logging.getLogger(__name__)
 
@@ -68,39 +69,48 @@ class Retriever:
             f"drug interaction mechanism clinical management."
             )
         try:
-            vector = await self._embedder.embed(query, correlation_id=correlation_id)
-
+            with mvp_metrics.time(M.RETRIEVER_EMBED_LATENCY):
+                vector = await self._embedder.embed(query, correlation_id=correlation_id)
         except EmbedderError as e:
-            logger.warning("retriever.embed_failed", extra = {**log_ctx, "error": str(e)})
+            logger.warning("retriever.embed_failed", extra={**log_ctx, "error": str(e)})
+            mvp_metrics.incr(M.RETRIEVER_EMBED_ERRORS)
             return []
-        
+
         try:
-            candidates = await self._store.query(
-                query_vector = vector, 
-                top_k = self._retrieve_k,
-                namespace=self._namespace,
-                correlation_id = correlation_id
-            )
+            with mvp_metrics.time(M.RETRIEVER_PINECONE_LATENCY):
+                candidates = await self._store.query(
+                    query_vector=vector,
+                    top_k=self._retrieve_k,
+                    namespace=self._namespace,
+                    correlation_id=correlation_id,
+                )
         except PineconeStoreError as e:
             logger.warning("retriever.pinecone_failed", extra={**log_ctx, "error": str(e)})
+            mvp_metrics.incr(M.RETRIEVER_PINECONE_ERRORS)
             return []
-        
+
         candidates = [c for c in candidates if c.score >= self._score_threshold]
         if not candidates:
             logger.info("retriever.no_candidates_above_threshold", extra=log_ctx)
+            mvp_metrics.incr(M.RETRIEVER_EMPTY_RESULTS)
             return []
+
         try:
-            ranked = await self._rerank(query, candidates)
+            with mvp_metrics.time(M.RETRIEVER_RERANK_LATENCY):
+                ranked = await self._rerank(query, candidates)
         except Exception as e:
-            logger.warning("retriever.rerank_failed", extra= {**log_ctx, "error": str(e)})
+            logger.warning("retriever.rerank_failed", extra={**log_ctx, "error": str(e)})
+            mvp_metrics.incr(M.RETRIEVER_RERANK_FAILURES)
             ranked = candidates[:self._rerank_n]
+
+        mvp_metrics.observe(M.RETRIEVER_CHUNKS_RETURNED, len(ranked))
         return ranked
-    
-    async def _rerank(self, query:str, candidates: list[QueryResult])-> list[QueryResult]:
+
+    async def _rerank(self, query: str, candidates: list[QueryResult]) -> list[QueryResult]:
         """Score candidates with cross-encoder, return top N. Runs model in thread."""
         pairs = [[query, c.metadata.text] for c in candidates]
         scores = await asyncio.to_thread(self._reranker.predict, pairs)
-        scored = sorted(zip(candidates, scores), key = lambda x: x[1], reverse =True)
+        scored = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
         return [c for c, _ in scored[:self._rerank_n]]
     
     async def retrieve_many(self, evidences: Sequence[InteractionEvidence], *, correlation_id : str | None = None, )-> list[RetrievalResult]:

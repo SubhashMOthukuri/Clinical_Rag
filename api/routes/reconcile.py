@@ -47,6 +47,7 @@ from src.utils.schema import (
     Status,
 )
 from src.utils.validators import validate_input, validate_response
+from src.utils.metrics import mvp_metrics, M
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,9 @@ async def reconcile(
     t0 = time.perf_counter()
     logger.info("reconcile.begin", extra={"cid": cid, "med_count": len(payload.medications)})
 
+    mvp_metrics.incr(M.RECONCILE_REQUESTS)
+    mvp_metrics.observe(M.MEDS_PER_REQUEST, len(payload.medications))
+
     # Stage 1: validate input — fails closed, raises StageValidationError
     validate_input(payload)
 
@@ -83,6 +87,7 @@ async def reconcile(
     # Step 4: pairwise interaction check (sync, pure text scan — fast)
     evidences = checker.check(enriched_meds, fda_map)
     logger.info("reconcile.evidences_found", extra={"cid": cid, "count": len(evidences)})
+    mvp_metrics.observe(M.DRUG_PAIRS_PER_REQUEST, len(evidences))
 
     if not evidences:
         return _build_response(
@@ -104,6 +109,21 @@ async def reconcile(
     response_status = (
         Status.PARTIAL if any("FDA_LABEL" in w.citation for w in warnings) else Status.SUCCESS
     )
+
+    # record per-request metrics
+    mvp_metrics.observe(M.RECONCILE_LATENCY, elapsed_ms)
+    if response_status == Status.SUCCESS:
+        mvp_metrics.incr(M.RECONCILE_STATUS_SUCCESS)
+    else:
+        mvp_metrics.incr(M.RECONCILE_STATUS_PARTIAL)
+    for w in warnings:
+        if w.severity == Severity.RED:
+            mvp_metrics.incr(M.WARNINGS_SEVERITY_RED)
+        elif w.severity == Severity.YELLOW:
+            mvp_metrics.incr(M.WARNINGS_SEVERITY_YELLOW)
+        else:
+            mvp_metrics.incr(M.WARNINGS_SEVERITY_GREEN)
+
     response = _build_response(
         medications=enriched_meds,
         warnings=warnings,

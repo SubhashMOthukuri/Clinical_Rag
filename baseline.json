@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "runs": 100,
+    "mode": "realistic_mock",
+    "timestamp": "2026-06-13T04:52:57.838760+00:00"
+  },
+  "summary": {
+    "mean_ms": 3362.8,
+    "p50_ms": 3436.5,
+    "p95_ms": 4170.7,
+    "p99_ms": 4380.0,
+    "max_ms": 4473.1,
+    "min_ms": 1839.4,
+    "partial_rate_pct": 0.0,
+    "error_count": 0
+  },
+  "per_stage_ms": {
+    "meds_per_request": {
+      "count": 100,
+      "mean": 2.35,
+      "p50": 2.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 3
+    },
+    "drug_pairs_per_request": {
+      "count": 100,
+      "mean": 1.7,
+      "p50": 1.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 3
+    },
+    "retriever.embed_latency_ms": {
+      "count": 170,
+      "mean": 336.141,
+      "p50": 338.672,
+      "p95": 442.765,
+      "p99": 449.016,
+      "max": 451.224
+    },
+    "retriever.pinecone_latency_ms": {
+      "count": 170,
+      "mean": 144.846,
+      "p50": 148.933,
+      "p95": 190.697,
+      "p99": 197.496,
+      "max": 198.944
+    },
+    "retriever.rerank_latency_ms": {
+      "count": 170,
+      "mean": 917.149,
+      "p50": 881.039,
+      "p95": 1331.221,
+      "p99": 1379.779,
+      "max": 1394.703
+    },
+    "retriever.chunks_returned": {
+      "count": 170,
+      "mean": 3,
+      "p50": 3.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 3
+    },
+    "generator.llm_latency_ms{provider=gemini}": {
+      "count": 149,
+      "mean": 1323.879,
+      "p50": 1350.443,
+      "p95": 1918.336,
+      "p99": 1968.117,
+      "max": 1974.342
+    },
+    "reconcile.latency_ms": {
+      "count": 100,
+      "mean": 3362.758,
+      "p50": 3436.486,
+      "p95": 4170.667,
+      "p99": 4380.011,
+      "max": 4473.053
+    },
+    "generator.llm_latency_ms{provider=groq}": {
+      "count": 21,
+      "mean": 471.799,
+      "p50": 498.98,
+      "p95": 648.782,
+      "p99": 655.947,
+      "max": 657.738
+    }
+  },
+  "counters": {
+    "reconcile.requests.total": 100,
+    "generator.gemini_ok.total": 149,
+    "reconcile.status.success": 100,
+    "warnings.severity.yellow": 170,
+    "generator.groq_ok.total": 21
+  },
+  "status_counts": {
+    "SUCCESS": 100
+  }
+}

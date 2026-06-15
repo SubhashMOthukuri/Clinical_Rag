@@ -28,6 +28,7 @@ from src.utils.validators import validate_llm_response, StageValidationError
 from src.generation.prompt_template import SYSTEM_PROMPT, build_user_prompt
 from datetime import datetime, timezone
 from src.utils.schema import DrugWarning, Severity, Action, DataSource
+from src.utils.metrics import mvp_metrics, M
 
 logger = logging.getLogger(__name__)
 
@@ -51,42 +52,51 @@ class Generator:
         )
     async def _call_llm(self, system_prompt: str, user_prompt: str, *, correlation_id : str | None = None)-> str:
         log_ctx = {"cid": correlation_id}
-        if not  self._gemini_breaker.is_open():
-            try: 
-                response= await asyncio.wait_for(asyncio.to_thread(
-                    self._gemini_client.models.generate_content,
-                    model= self._gemini_model,
-                    contents = user_prompt,
-                    config={
-                        "system_instruction": system_prompt,
-                        "temperature": 0
-                    },
-                ), timeout=self._timeout_s
-                )
+        if not self._gemini_breaker.is_open():
+            try:
+                with mvp_metrics.time(M.GENERATOR_LLM_LATENCY, provider="gemini"):
+                    response = await asyncio.wait_for(asyncio.to_thread(
+                        self._gemini_client.models.generate_content,
+                        model=self._gemini_model,
+                        contents=user_prompt,
+                        config={"system_instruction": system_prompt, "temperature": 0},
+                    ), timeout=self._timeout_s)
                 self._gemini_breaker.record_success()
+                mvp_metrics.incr(M.GENERATOR_GEMINI_OK)
                 return response.text
             except Exception as e:
                 self._gemini_breaker.record_failure()
-                logger.warning("generator.gemini_failed_fallback", extra={**log_ctx, "error": str(e)},
-                )
+                mvp_metrics.incr(M.GENERATOR_GEMINI_ERRORS)
+                logger.warning("generator.gemini_failed_fallback", extra={**log_ctx, "error": str(e)})
+        else:
+            mvp_metrics.incr(M.BREAKER_GEMINI_OPEN)
+
         if not self._groq_breaker.is_open():
             try:
-                response = await asyncio.wait_for(
-                    self._groq_client.chat.completions.create(
-                        model= self._groq_model,
-                        messages= [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ], temperature=0
-                    ), timeout =self._timeout_s,
-                )
+                with mvp_metrics.time(M.GENERATOR_LLM_LATENCY, provider="groq"):
+                    response = await asyncio.wait_for(
+                        self._groq_client.chat.completions.create(
+                            model=self._groq_model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            temperature=0,
+                        ), timeout=self._timeout_s,
+                    )
                 self._groq_breaker.record_success()
+                mvp_metrics.incr(M.GENERATOR_GROQ_OK)
                 return response.choices[0].message.content
             except Exception as e:
                 self._groq_breaker.record_failure()
-                logger.error("generator.all_providers_failed", extra ={**log_ctx, "error": str(e)},)
+                mvp_metrics.incr(M.GENERATOR_GROQ_ERRORS)
+                logger.error("generator.all_providers_failed", extra={**log_ctx, "error": str(e)})
                 raise GeneratorUnavailable("Both Gemini and Groq failed") from e
-        logger.error("generator.all_providers_unavailable", extra= log_ctx)
+        else:
+            mvp_metrics.incr(M.BREAKER_GROQ_OPEN)
+
+        mvp_metrics.incr(M.GENERATOR_ALL_FAILED)
+        logger.error("generator.all_providers_unavailable", extra=log_ctx)
         raise GeneratorUnavailable("Both provider circuit breakers are open.")
 
     async def generate_one(
@@ -120,12 +130,14 @@ class Generator:
                 "generator.fallback_to_fda",
                 extra={"cid": correlation_id, "reason": str(e)},
             )
+            mvp_metrics.incr(M.GENERATOR_FALLBACKS)
             return self._fda_fallback(evidence, reason=str(e))
         except Exception as e:
             logger.error(
                 "generator.unexpected_failure",
                 extra={"cid": correlation_id, "error": str(e)},
             )
+            mvp_metrics.incr(M.GENERATOR_FALLBACKS)
             return self._fda_fallback(evidence, reason=f"unexpected: {type(e).__name__}")
 
     async def generate_many(
